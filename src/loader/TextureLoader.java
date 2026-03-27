@@ -1,76 +1,106 @@
 package loader;
 
-
+import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
+import org.lwjgl.vulkan.*;
+
 import java.nio.ByteBuffer;
-import java.nio.IntBuffer;
 
-import static org.lwjgl.opengl.EXTTextureFilterAnisotropic.GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT;
-import static org.lwjgl.opengl.EXTTextureFilterAnisotropic.GL_TEXTURE_MAX_ANISOTROPY_EXT;
-import static org.lwjgl.opengl.GL.getCapabilities;
-import static org.lwjgl.opengl.GL11.*;
-import static org.lwjgl.opengl.GL12.GL_CLAMP_TO_EDGE;
-import static org.lwjgl.opengl.GL12.GL_TEXTURE_BASE_LEVEL;
-import static org.lwjgl.opengl.GL12.GL_TEXTURE_MAX_LEVEL;
-import static org.lwjgl.opengl.GL14.GL_TEXTURE_LOD_BIAS;
-import static org.lwjgl.opengl.GL30.glGenerateMipmap;
-import static org.lwjgl.stb.STBImage.*;
+import static org.lwjgl.vulkan.VK12.*;
 
-/**
- * High-Performance Texture Loader using STB_Image.
- * Bypasses java.awt.BufferedImage entirely for zero Java-heap allocations.
- */
 public class TextureLoader {
 
-    public static int loadTexture(String path) {
-        int textureID = glGenTextures();
-        glBindTexture(GL_TEXTURE_2D, textureID);
+    // Assuming you have a central Vulkan context class holding your logical device and physical device
+    private static final VkDevice device = VulkanContext.getDevice();
 
-        // Wrapping parameters
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, 0.0f);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 4);
+    /**
+     * Uploads raw decoded pixel data to the GPU using a Staging Buffer.
+     */
+    public static int uploadToGPU(ByteBuffer decodedPixels, int width, int height) {
+        long imageSize = (long) width * height * 4; // 4 bytes per pixel (RGBA)
 
-        // Use LWJGL's MemoryStack to handle short-lived pointers without GC overhead
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            IntBuffer width = stack.mallocInt(1);
-            IntBuffer height = stack.mallocInt(1);
-            IntBuffer channels = stack.mallocInt(1);
 
-            // STB expects textures to be flipped vertically compared to Java
-            stbi_set_flip_vertically_on_load(true);
+            // ==========================================
+            // 1. CREATE AND FILL THE STAGING BUFFER
+            // ==========================================
+            // Create a buffer in CPU-visible RAM
+            long stagingBuffer = VulkanUtils.createBuffer(
+                    imageSize,
+                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+            );
+            long stagingBufferMemory = VulkanUtils.allocateBufferMemory(
+                    stagingBuffer,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+            );
 
-            // Load directly into OFF-HEAP memory. ZERO Java objects created!
-            // 4 = STBI_rgb_alpha (forces RGBA channels)
-            ByteBuffer imageBuffer = stbi_load("resources/textures/" + path, width, height, channels, 4);
+            // Map the Vulkan memory to a Java pointer and blast the pixels in
+            PointerBuffer data = stack.mallocPointer(1);
+            vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, data);
+            MemoryUtil.memCopy(MemoryUtil.memAddress(decodedPixels), data.get(0), imageSize);
+            vkUnmapMemory(device, stagingBufferMemory);
 
-            if (imageBuffer == null) {
-                throw new RuntimeException("Failed to load texture file: " + path + "\n" + stbi_failure_reason());
-            }
+            // ==========================================
+            // 2. CREATE THE VULKAN IMAGE (DEVICE LOCAL)
+            // ==========================================
+            // Create the optimal GPU image object
+            long vkImage = VulkanUtils.createImage(
+                    width, height,
+                    VK_FORMAT_R8G8B8A8_SRGB,
+                    VK_IMAGE_TILING_OPTIMAL,
+                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+            );
 
-            // Upload directly from the native C buffer to the GPU
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width.get(0), height.get(0),
-                    0, GL_RGBA, GL_UNSIGNED_BYTE, imageBuffer);
+            // Allocate the fastest memory the Intel UHD can provide and bind it
+            long vkImageMemory = VulkanUtils.allocateImageMemory(
+                    vkImage,
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+            );
+            vkBindImageMemory(device, vkImage, vkImageMemory, 0);
 
-            // Free the native memory immediately after giving it to OpenGL
-            stbi_image_free(imageBuffer);
+            // ==========================================
+            // 3. TRANSITIONS AND COPYING
+            // ==========================================
+            // We use a single-use command buffer to perform the transfers on the GPU
+            VkCommandBuffer commandBuffer = VulkanUtils.beginSingleTimeCommands();
+
+            // Transition from UNDEFINED to receiving data
+            VulkanUtils.transitionImageLayout(
+                    commandBuffer, vkImage,
+                    VK_FORMAT_R8G8B8A8_SRGB,
+                    VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+            );
+
+            // Copy the buffer to the image
+            VulkanUtils.copyBufferToImage(commandBuffer, stagingBuffer, vkImage, width, height);
+
+            // Transition from receiving data to shader-readable
+            VulkanUtils.transitionImageLayout(
+                    commandBuffer, vkImage,
+                    VK_FORMAT_R8G8B8A8_SRGB,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            );
+
+            VulkanUtils.endSingleTimeCommands(commandBuffer);
+
+            // ==========================================
+            // 4. CLEANUP RAM & CREATE VIEWS
+            // ==========================================
+            // Free the CPU staging buffer immediately to keep memory footprint low!
+            vkDestroyBuffer(device, stagingBuffer, null);
+            vkFreeMemory(device, stagingBufferMemory, null);
+
+            // Create the ImageView (how the shader interprets the memory)
+            long imageView = VulkanUtils.createImageView(vkImage, VK_FORMAT_R8G8B8A8_SRGB);
+
+            // Create the Sampler (filtering, wrapping, anisotropic settings)
+            long sampler = VulkanUtils.createTextureSampler();
+
+            // Register this complete texture package and return an integer ID for your RendererManager
+            return TextureRegistry.add(vkImage, vkImageMemory, imageView, sampler);
         }
-
-        glGenerateMipmap(GL_TEXTURE_2D);
-
-        // Anisotropic Filtering
-        if (getCapabilities().GL_EXT_texture_filter_anisotropic) {
-            float maxAnisotropy = glGetFloat(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT);
-            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, Math.min(4.0f, maxAnisotropy));
-        }
-
-        glBindTexture(GL_TEXTURE_2D, 0);
-
-        ModelLoader.addTexture(textureID);
-        return textureID;
     }
 }
