@@ -1,67 +1,29 @@
 package engine;
 
 import hardware.Display;
-import hotswap.EngineState;
-import hotswap.IEngine;
+import renderer.MasterRenderer;
 
 /**
- * The actual core of your video game. 
- * This is the file that gets downloaded and hot-swapped!
+ * The main entry point for the application.
  */
-public class GameEngine implements IEngine
-{
+public class GameEngine {
 
-    private boolean isRunning = false;
-    private float playerX = 0f; // Example state
+    public static void main(String[] args) {
+        System.out.println("Starting Engine Initialization...");
 
-    @Override
-    public void start(EngineState state) {
-        System.out.println("Starting Game Engine Payload...");
-
-        // 1. Unpack the briefcase from the previous engine version
-        if (state.persistentData.containsKey("playerX")) {
-            this.playerX = (float) state.persistentData.get("playerX");
-            System.out.println("Restored player position to: " + playerX);
-        }
-
-        // 2. Boot up the Hardware (LWJGL window opens)
+        // 1. Ignite the Hardware (This triggers our Vulkan diagnostics!)
         Display.createDisplay(1280, 720);
-        isRunning = true;
+        MasterRenderer.setRenderer();
 
-        // 3. Start the main game loop
-        runGameLoop();
-    }
-
-    private void runGameLoop() {
-        while (isRunning && !Display.shouldDisplayClose()) {
-            // ... Update logic, poll keyboard, render ...
-
-            // Simulating player moving right
-            playerX += 0.01f;
-
+        // 2. The Core Engine Loop
+        System.out.println("Entering Main Game Loop...");
+        while (!Display.shouldDisplayClose()) {
             Display.updateDisplay();
         }
-    }
 
-    @Override
-    public EngineState stopAndExtractState() {
-        System.out.println("Initiating Shutdown for Hotswap...");
-        isRunning = false;
-
-        // 1. Pack the briefcase!
-        EngineState stateToSave = new EngineState();
-        stateToSave.persistentData.put("playerX", this.playerX);
-        // stateToSave.persistentData.put("currentLevel", "Level_2");
-
-        // 2. Kill the window (Screen goes black)
+        MasterRenderer.destroy();
+        // 3. Clean Shutdown
         Display.closeDisplay();
-
-        // 3. Return the briefcase to the Bootloader so it survives the swap
-        return stateToSave;
-    }
-
-    @Override
-    public boolean isRunning() {
-        return isRunning;
+        System.out.println("Engine shut down successfully.");
     }
 }
