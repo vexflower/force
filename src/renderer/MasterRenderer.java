@@ -1,7 +1,10 @@
 package renderer;
+
 import hardware.Display;
 import lang.Mat4;
+import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.*;
 
 import java.nio.IntBuffer;
@@ -19,23 +22,40 @@ public class MasterRenderer {
     private static long[] swapchainImages;
     private static long[] swapchainImageViews;
     private static int swapchainImageFormat;
-    // FIX: Allocate this permanently in global off-heap memory!
+
+    // Global off-heap extent
     private static VkExtent2D swapchainExtent = VkExtent2D.calloc();
+
     // Phase 2 State
     private static long renderPass;
     private static long[] framebuffers;
 
-    // =========================================================================================
     // PHASE 3 & 4 State (UPDATED FOR FRAMES IN FLIGHT)
-    // =========================================================================================
     public static final int MAX_FRAMES_IN_FLIGHT = 2;
     private static int currentFrame = 0;
 
     private static long commandPool;
-    private static VkCommandBuffer[] commandBuffers; // Array of buffers
-    private static long[] imageAvailableSemaphores;  // Array of handles
+    private static VkCommandBuffer[] commandBuffers;
+    private static long[] imageAvailableSemaphores;
     private static long[] renderFinishedSemaphores;
     private static long[] inFlightFences;
+
+    // =========================================================================================
+    // ZERO-GC RENDER LOOP CACHE (Permanent Off-Heap Memory)
+    // =========================================================================================
+    private static IntBuffer pImageIndex;
+    private static VkCommandBufferBeginInfo beginInfo;
+    private static VkRenderPassBeginInfo renderPassInfo;
+    private static VkRect2D renderArea;
+    private static VkClearValue.Buffer clearValues;
+    private static VkSubmitInfo submitInfo;
+    private static VkPresentInfoKHR presentInfo;
+
+    private static LongBuffer pWaitSemaphores;
+    private static IntBuffer pWaitDstStageMask;
+    private static PointerBuffer pCommandBuffers;
+    private static LongBuffer pSignalSemaphores;
+    private static LongBuffer pSwapchains;
 
     /**
      * Boot up the Vulkan Rendering Pipeline.
@@ -53,6 +73,53 @@ public class MasterRenderer {
         createCommandPool();
         createCommandBuffer();
         createSyncObjects();
+
+        // Allocate the Zero-GC Structs at the very end
+        initRenderLoopStructs();
+    }
+
+    private static void initRenderLoopStructs() {
+        System.out.println("Allocating Zero-GC Render Structs...");
+
+        pImageIndex = MemoryUtil.memAllocInt(1);
+
+        beginInfo = VkCommandBufferBeginInfo.calloc()
+                .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO);
+
+        // Assign float array directly to avoid memory leaks
+        clearValues = VkClearValue.calloc(1);
+        clearValues.color()
+                .float32(0, 0.1f)
+                .float32(1, 0.1f)
+                .float32(2, 0.15f)
+                .float32(3, 1.0f);
+
+        // Access the nested struct directly, no extra calloc needed
+        renderArea = VkRect2D.calloc();
+        renderArea.offset().set(0, 0);
+
+        renderPassInfo = VkRenderPassBeginInfo.calloc()
+                .sType(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO)
+                .renderPass(renderPass)
+                .pClearValues(clearValues);
+
+        // Pre-allocate array pointers
+        pWaitSemaphores = MemoryUtil.memAllocLong(1);
+        pWaitDstStageMask = MemoryUtil.memAllocInt(1).put(0, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+        pCommandBuffers = MemoryUtil.memAllocPointer(1);
+        pSignalSemaphores = MemoryUtil.memAllocLong(1);
+        pSwapchains = MemoryUtil.memAllocLong(1).put(0, swapchain);
+
+        submitInfo = VkSubmitInfo.calloc()
+                .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                .waitSemaphoreCount(1)
+                .pWaitDstStageMask(pWaitDstStageMask);
+
+        presentInfo = VkPresentInfoKHR.calloc()
+                .sType(VK_STRUCTURE_TYPE_PRESENT_INFO_KHR)
+                .swapchainCount(1)
+                .pSwapchains(pSwapchains)
+                .pImageIndices(pImageIndex);
     }
 
     private static void createSwapchain() {
@@ -61,16 +128,13 @@ public class MasterRenderer {
             VkPhysicalDevice physicalDevice = Display.getPhysicalDevice();
             long surface = Display.getSurface();
 
-            // 1. Get Surface Capabilities (Min/Max images, width/height limits)
             VkSurfaceCapabilitiesKHR capabilities = VkSurfaceCapabilitiesKHR.calloc(stack);
             vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, capabilities);
 
-            // If the hardware surface dictates the size, we MUST use it (Standard for macOS/Retina)
             if (capabilities.currentExtent().width() != 0xFFFFFFFF) {
                 swapchainExtent.width(capabilities.currentExtent().width());
                 swapchainExtent.height(capabilities.currentExtent().height());
             } else {
-                // Fallback: Manually query the actual pixel count from GLFW
                 IntBuffer width = stack.mallocInt(1);
                 IntBuffer height = stack.mallocInt(1);
                 org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(Display.getWindow(), width, height);
@@ -78,16 +142,13 @@ public class MasterRenderer {
                 swapchainExtent.height(height.get(0));
             }
 
-            // 3. Request the number of images (Double Buffering = 2, Triple Buffering = 3)
             int imageCount = capabilities.minImageCount() + 1;
             if (capabilities.maxImageCount() > 0 && imageCount > capabilities.maxImageCount()) {
                 imageCount = capabilities.maxImageCount();
             }
 
-            // 4. Hardcode standard color format (Standard 32-bit RGBA)
             swapchainImageFormat = VK_FORMAT_B8G8R8A8_UNORM;
 
-            // 5. Build the Swapchain Creation Struct
             VkSwapchainCreateInfoKHR createInfo = VkSwapchainCreateInfoKHR.calloc(stack);
             createInfo.sType(VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR);
             createInfo.surface(surface);
@@ -96,22 +157,20 @@ public class MasterRenderer {
             createInfo.imageColorSpace(VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
             createInfo.imageExtent(swapchainExtent);
             createInfo.imageArrayLayers(1);
-            createInfo.imageUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT); // We will draw colors to it
+            createInfo.imageUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
 
             createInfo.presentMode(VK_PRESENT_MODE_IMMEDIATE_KHR);
             createInfo.preTransform(capabilities.currentTransform());
-            createInfo.compositeAlpha(VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR); // Ignore window transparency
+            createInfo.compositeAlpha(VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR);
             createInfo.clipped(true);
             createInfo.oldSwapchain(VK_NULL_HANDLE);
 
-            // 6. Tell the GPU to create the Swapchain
             LongBuffer pSwapchain = stack.mallocLong(1);
             if (vkCreateSwapchainKHR(device, createInfo, null, pSwapchain) != VK_SUCCESS) {
                 throw new RuntimeException("Failed to create Vulkan Swapchain!");
             }
             swapchain = pSwapchain.get(0);
 
-            // 7. Extract the raw Image handles generated by the Swapchain
             IntBuffer pImageCount = stack.mallocInt(1);
             vkGetSwapchainImagesKHR(device, swapchain, pImageCount, null);
             LongBuffer pSwapchainImages = stack.mallocLong(pImageCount.get(0));
@@ -121,8 +180,6 @@ public class MasterRenderer {
             for (int i = 0; i < swapchainImages.length; i++) {
                 swapchainImages[i] = pSwapchainImages.get(i);
             }
-
-            System.out.println("Vulkan Swapchain created with " + swapchainImages.length + " images.");
         }
     }
 
@@ -137,14 +194,10 @@ public class MasterRenderer {
                 createInfo.image(swapchainImages[i]);
                 createInfo.viewType(VK_IMAGE_VIEW_TYPE_2D);
                 createInfo.format(swapchainImageFormat);
-
-                // Map color channels purely (R to R, G to G, etc.)
                 createInfo.components().r(VK_COMPONENT_SWIZZLE_IDENTITY);
                 createInfo.components().g(VK_COMPONENT_SWIZZLE_IDENTITY);
                 createInfo.components().b(VK_COMPONENT_SWIZZLE_IDENTITY);
                 createInfo.components().a(VK_COMPONENT_SWIZZLE_IDENTITY);
-
-                // No mipmapping, just 1 base color layer
                 createInfo.subresourceRange().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT);
                 createInfo.subresourceRange().baseMipLevel(0);
                 createInfo.subresourceRange().levelCount(1);
@@ -158,12 +211,7 @@ public class MasterRenderer {
                 swapchainImageViews[i] = pImageView.get(0);
             }
         }
-        System.out.println("Vulkan Image Views successfully mapped.");
     }
-
-    // =========================================================================================
-    // PHASE 2: RENDER PASS & FRAMEBUFFERS
-    // =========================================================================================
 
     private static void createRenderPass() {
         try (MemoryStack stack = stackPush()) {
@@ -172,7 +220,7 @@ public class MasterRenderer {
             VkAttachmentDescription.Buffer colorAttachment = VkAttachmentDescription.calloc(1, stack);
             colorAttachment.format(swapchainImageFormat);
             colorAttachment.samples(VK_SAMPLE_COUNT_1_BIT);
-            colorAttachment.loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR); // Clear screen to black
+            colorAttachment.loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR);
             colorAttachment.storeOp(VK_ATTACHMENT_STORE_OP_STORE);
             colorAttachment.stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE);
             colorAttachment.stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE);
@@ -207,7 +255,6 @@ public class MasterRenderer {
                 throw new RuntimeException("Failed to create Vulkan Render Pass!");
             }
             renderPass = pRenderPass.get(0);
-            System.out.println("Vulkan Render Pass established.");
         }
     }
 
@@ -235,13 +282,8 @@ public class MasterRenderer {
                 }
                 framebuffers[i] = pFramebuffer.get(0);
             }
-            System.out.println("Vulkan Framebuffers linked successfully.");
         }
     }
-
-    // =========================================================================================
-    // PHASE 3 & 4: COMMANDS & SYNC
-    // =========================================================================================
 
     private static void createCommandPool() {
         try (MemoryStack stack = stackPush()) {
@@ -266,9 +308,9 @@ public class MasterRenderer {
             allocInfo.sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO);
             allocInfo.commandPool(commandPool);
             allocInfo.level(VK_COMMAND_BUFFER_LEVEL_PRIMARY);
-            allocInfo.commandBufferCount(MAX_FRAMES_IN_FLIGHT); // Allocate 2 at once
+            allocInfo.commandBufferCount(MAX_FRAMES_IN_FLIGHT);
 
-            org.lwjgl.PointerBuffer pCommandBuffers = stack.mallocPointer(MAX_FRAMES_IN_FLIGHT);
+            PointerBuffer pCommandBuffers = stack.mallocPointer(MAX_FRAMES_IN_FLIGHT);
             if (vkAllocateCommandBuffers(Display.getDevice(), allocInfo, pCommandBuffers) != VK_SUCCESS) {
                 throw new RuntimeException("Failed to allocate command buffers!");
             }
@@ -290,7 +332,7 @@ public class MasterRenderer {
 
             VkFenceCreateInfo fenceInfo = VkFenceCreateInfo.calloc(stack);
             fenceInfo.sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
-            fenceInfo.flags(VK_FENCE_CREATE_SIGNALED_BIT); // Start signaled so the first frame doesn't block forever
+            fenceInfo.flags(VK_FENCE_CREATE_SIGNALED_BIT);
 
             LongBuffer pSemaphore = stack.mallocLong(1);
             LongBuffer pFence = stack.mallocLong(1);
@@ -321,92 +363,72 @@ public class MasterRenderer {
         // 1. Wait for the CURRENT frame's fence to open
         vkWaitForFences(device, inFlightFences[currentFrame], true, ~0L);
 
-        try (MemoryStack stack = stackPush()) {
-            IntBuffer pImageIndex = stack.mallocInt(1);
+        // 2. Acquire image (ZERO GC)
+        int result = vkAcquireNextImageKHR(device, swapchain, ~0L, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, pImageIndex);
 
-            // 2. Acquire image (ONLY CALLED ONCE)
-            int result = vkAcquireNextImageKHR(device, swapchain, ~0L, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, pImageIndex);
-
-            if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-                // The window resized or shifted. The frame is dead
-                recreateSwapchain();
-                return;
-            } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-                throw new RuntimeException("Failed to acquire swapchain image!");
-            }
-
-            int imageIndex = pImageIndex.get(0);
-
-            // 3. Reset the fence BEFORE submitting the command buffer
-            vkResetFences(device, inFlightFences[currentFrame]);
-
-            VkCommandBuffer currentCmdBuffer = commandBuffers[currentFrame];
-            vkResetCommandBuffer(currentCmdBuffer, 0);
-
-            VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack);
-            beginInfo.sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO);
-            vkBeginCommandBuffer(currentCmdBuffer, beginInfo);
-
-            VkRenderPassBeginInfo renderPassInfo = VkRenderPassBeginInfo.calloc(stack);
-            renderPassInfo.sType(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO);
-            renderPassInfo.renderPass(renderPass);
-            renderPassInfo.framebuffer(framebuffers[imageIndex]);
-
-            VkRect2D renderArea = VkRect2D.calloc(stack);
-            renderArea.offset(VkOffset2D.calloc(stack).set(0, 0));
-            renderArea.extent(swapchainExtent);
-            renderPassInfo.renderArea(renderArea);
-
-            VkClearValue.Buffer clearValues = VkClearValue.calloc(1, stack);
-            clearValues.color().float32(stack.floats(0.1f, 0.1f, 0.15f, 1.0f));
-            renderPassInfo.pClearValues(clearValues);
-
-            vkCmdBeginRenderPass(currentCmdBuffer, renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-            shader.VKShader.bind(shader.VKShader.EntityShaderPipeline.pipeline, currentCmdBuffer);
-            shader.VKShader.EntityShaderPipeline.loadTransformationMatrix(currentCmdBuffer, transform);
-
-            vkCmdDraw(currentCmdBuffer, 3, 1, 0, 0);
-
-            vkCmdEndRenderPass(currentCmdBuffer);
-            if (vkEndCommandBuffer(currentCmdBuffer) != VK_SUCCESS) {
-                throw new RuntimeException("Failed to record command buffer!");
-            }
-
-            // 4. Submit using CURRENT frame's sync objects
-            VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack);
-            submitInfo.sType(VK_STRUCTURE_TYPE_SUBMIT_INFO);
-            submitInfo.waitSemaphoreCount(1);
-            submitInfo.pWaitSemaphores(stack.longs(imageAvailableSemaphores[currentFrame]));
-            submitInfo.pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT));
-            submitInfo.pCommandBuffers(stack.pointers(currentCmdBuffer));
-            submitInfo.pSignalSemaphores(stack.longs(renderFinishedSemaphores[currentFrame]));
-
-            if (vkQueueSubmit(Display.getGraphicsQueue(), submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) {
-                throw new RuntimeException("Failed to submit draw command buffer!");
-            }
-
-            // 5. Present using CURRENT frame's semaphore
-            VkPresentInfoKHR presentInfo = VkPresentInfoKHR.calloc(stack);
-            presentInfo.sType(VK_STRUCTURE_TYPE_PRESENT_INFO_KHR);
-            presentInfo.pWaitSemaphores(stack.longs(renderFinishedSemaphores[currentFrame]));
-            presentInfo.swapchainCount(1);
-            presentInfo.pSwapchains(stack.longs(swapchain));
-            presentInfo.pImageIndices(pImageIndex);
-
-            // 6. Present to screen (ONLY CALLED ONCE)
-            result = vkQueuePresentKHR(Display.getPresentQueue(), presentInfo);
-
-            if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-                // The OS rejected the frame presentation. Rebuild for the next loop.
-                recreateSwapchain();
-            } else if (result != VK_SUCCESS) {
-                throw new RuntimeException("Failed to present swapchain image!");
-            }
-
-            // 7. Advance to the next frame (Zero Allocation!)
-            currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+            recreateSwapchain();
+            return;
+        } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+            throw new RuntimeException("Failed to acquire swapchain image!");
         }
+
+        int imageIndex = pImageIndex.get(0);
+
+        // 3. Reset the fence BEFORE submitting the command buffer
+        vkResetFences(device, inFlightFences[currentFrame]);
+
+        VkCommandBuffer currentCmdBuffer = commandBuffers[currentFrame];
+        vkResetCommandBuffer(currentCmdBuffer, 0);
+
+        // Begin Command Buffer
+        vkBeginCommandBuffer(currentCmdBuffer, beginInfo);
+
+        // Update dynamic states
+        renderArea.extent(swapchainExtent);
+        renderPassInfo.framebuffer(framebuffers[imageIndex]);
+        renderPassInfo.renderArea(renderArea);
+
+        vkCmdBeginRenderPass(currentCmdBuffer, renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        shader.VKShader.bind(shader.VKShader.EntityShaderPipeline.pipeline, currentCmdBuffer);
+        shader.VKShader.EntityShaderPipeline.loadTransformationMatrix(currentCmdBuffer, transform);
+
+        vkCmdDraw(currentCmdBuffer, 3, 1, 0, 0);
+
+        vkCmdEndRenderPass(currentCmdBuffer);
+        if (vkEndCommandBuffer(currentCmdBuffer) != VK_SUCCESS) {
+            throw new RuntimeException("Failed to record command buffer!");
+        }
+
+        // 4. Update the Sync Pointers for the current frame
+        pWaitSemaphores.put(0, imageAvailableSemaphores[currentFrame]);
+        pCommandBuffers.put(0, currentCmdBuffer);
+        pSignalSemaphores.put(0, renderFinishedSemaphores[currentFrame]);
+
+        // Submit (ZERO GC)
+        submitInfo.pWaitSemaphores(pWaitSemaphores);
+        submitInfo.pCommandBuffers(pCommandBuffers);
+        submitInfo.pSignalSemaphores(pSignalSemaphores);
+
+        if (vkQueueSubmit(Display.getGraphicsQueue(), submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) {
+            throw new RuntimeException("Failed to submit draw command buffer!");
+        }
+
+        // 5. Present (ZERO GC)
+        presentInfo.pWaitSemaphores(pSignalSemaphores);
+
+        result = vkQueuePresentKHR(Display.getPresentQueue(), presentInfo);
+
+        // We handle SUBOPTIMAL gracefully without crashing here so dragging is smoother
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+            recreateSwapchain();
+        } else if (result != VK_SUCCESS) {
+            throw new RuntimeException("Failed to present swapchain image!");
+        }
+
+        // 6. Advance to the next frame
+        currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
     private static void cleanupSwapchain() {
@@ -450,11 +472,7 @@ public class MasterRenderer {
 
         VkDevice device = Display.getDevice();
 
-        // 2. Halting the GPU
-        // We absolutely CANNOT delete objects that the GPU is currently using to draw a frame.
         vkDeviceWaitIdle(device);
-
-        // 3. Destroy the old architecture
         cleanupSwapchain();
 
         // 4. Rebuild the architecture with the new dimensions
@@ -462,22 +480,22 @@ public class MasterRenderer {
         createImageViews();
         createRenderPass();
 
-        // Re-compile the shader pipeline so the Viewport & Scissor match the new Extent
         shader.VKShader.EntityShaderPipeline.pipeline = new shader.VKShader.EntityShaderPipeline(device, renderPass, swapchainExtent);
 
         createFramebuffers();
 
-        // Note: Command Pools and Sync Objects do not depend on window size,
-        // so we don't need to recreate them!
+        // === STALE POINTER FIX: Update the persistent Zero-GC handles! ===
+        if (renderPassInfo != null) {
+            renderPassInfo.renderPass(renderPass);
+            pSwapchains.put(0, swapchain);
+        }
     }
 
     public static void destroy() {
         VkDevice device = Display.getDevice();
         if (device != null) {
-            // Wait for GPU to finish its final frame before destroying things
             vkDeviceWaitIdle(device);
 
-            // Destroy Phase 3/4 (Sync & Commands)
             for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
                 vkDestroySemaphore(device, renderFinishedSemaphores[i], null);
                 vkDestroySemaphore(device, imageAvailableSemaphores[i], null);
@@ -485,9 +503,25 @@ public class MasterRenderer {
             }
             vkDestroyCommandPool(device, commandPool, null);
 
-            // Destroy Phase 1/2 (Swapchain, Pipeline, Framebuffers)
             cleanupSwapchain();
-            swapchainExtent.free(); // Free the global struct
+            swapchainExtent.free();
+        }
+
+        // === ZERO-GC SAFELY FREE: Must be outside the device-null check to prevent leaks! ===
+        if(beginInfo != null) {
+            beginInfo.free();
+            clearValues.free();
+            renderArea.free();
+            renderPassInfo.free();
+            submitInfo.free();
+            presentInfo.free();
+
+            MemoryUtil.memFree(pImageIndex);
+            MemoryUtil.memFree(pWaitSemaphores);
+            MemoryUtil.memFree(pWaitDstStageMask);
+            MemoryUtil.memFree(pCommandBuffers);
+            MemoryUtil.memFree(pSignalSemaphores);
+            MemoryUtil.memFree(pSwapchains);
         }
     }
 }
