@@ -44,9 +44,9 @@ public class Mat4 {
         m30 = src.m30; m31 = src.m31; m32 = src.m32; m33 = src.m33;
         return this;
     }
+
     // ========================================================================
     // STATIC ENGINE ROOM (The Absolute Fastest Path)
-
     // ========================================================================
 
     public static void mul(Mat4 left, Mat4 right, Mat4 dest) {
@@ -80,9 +80,9 @@ public class Mat4 {
         dest.m32 = l02 * r30 + l12 * r31 + l22 * r32 + l32 * r33;
         dest.m33 = l03 * r30 + l13 * r31 + l23 * r32 + l33 * r33;
     }
+
     // ========================================================================
     // INSTANCE WRAPPERS
-
     // ========================================================================
 
     public Mat4 mul(Mat4 right) {
@@ -102,14 +102,14 @@ public class Mat4 {
         m33 += m03 * x + m13 * y + m23 * z;
         return this;
     }
-    // Note: Changed angle parameter from 'double' to 'float' to prevent casting overhead
 
+    // Note: Changed angle parameter from 'double' to 'float' to prevent casting overhead
     public Mat4 rotate(float angle, float x, float y, float z) {
         return rotate(angle, x, y, z, this);
     }
 
     public Mat4 rotate(float angle, float x, float y, float z, Mat4 dest) {
-        // USE FAST MATH LUT HERE
+        // USE FASTMATH LUT HERE
         float c = FastMath.cos32(angle);
         float s = FastMath.sin32(angle);
         float omc = 1.0f - c;
@@ -158,9 +158,60 @@ public class Mat4 {
         m20 *= z; m21 *= z; m22 *= z; m23 *= z;
         return this;
     }
+
+    public Mat4 rotateX(float angle) {
+        float c = FastMath.cos32(angle);
+        float s = FastMath.sin32(angle);
+        float rm10 = m10, rm11 = m11, rm12 = m12, rm13 = m13;
+        float rm20 = m20, rm21 = m21, rm22 = m22, rm23 = m23;
+
+        m10 = rm10 * c + rm20 * s;
+        m11 = rm11 * c + rm21 * s;
+        m12 = rm12 * c + rm22 * s;
+        m13 = rm13 * c + rm23 * s;
+        m20 = rm10 * -s + rm20 * c;
+        m21 = rm11 * -s + rm21 * c;
+        m22 = rm12 * -s + rm22 * c;
+        m23 = rm13 * -s + rm23 * c;
+        return this;
+    }
+
+    public Mat4 rotateY(float angle) {
+        float c = FastMath.cos32(angle);
+        float s = FastMath.sin32(angle);
+        float rm00 = m00, rm01 = m01, rm02 = m02, rm03 = m03;
+        float rm20 = m20, rm21 = m21, rm22 = m22, rm23 = m23;
+
+        m00 = rm00 * c + rm20 * -s;
+        m01 = rm01 * c + rm21 * -s;
+        m02 = rm02 * c + rm22 * -s;
+        m03 = rm03 * c + rm23 * -s;
+        m20 = rm00 * s + rm20 * c;
+        m21 = rm01 * s + rm21 * c;
+        m22 = rm02 * s + rm22 * c;
+        m23 = rm03 * s + rm23 * c;
+        return this;
+    }
+
+    public Mat4 rotateZ(float angle) {
+        float c = FastMath.cos32(angle);
+        float s = FastMath.sin32(angle);
+        float rm00 = m00, rm01 = m01, rm02 = m02, rm03 = m03;
+        float rm10 = m10, rm11 = m11, rm12 = m12, rm13 = m13;
+
+        m00 = rm00 * c + rm10 * s;
+        m01 = rm01 * c + rm11 * s;
+        m02 = rm02 * c + rm12 * s;
+        m03 = rm03 * c + rm13 * s;
+        m10 = rm00 * -s + rm10 * c;
+        m11 = rm01 * -s + rm11 * c;
+        m12 = rm02 * -s + rm12 * c;
+        m13 = rm03 * -s + rm13 * c;
+        return this;
+    }
+
     // ========================================================================
     // BUFFER STREAMING
-
     // ========================================================================
 
     public Mat4 store(FloatBuffer buf) {

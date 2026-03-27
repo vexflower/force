@@ -19,7 +19,7 @@ public class SpirVCompiler {
     private static final String SOURCE_DIR = "src/shader/";
     private static final String OUTPUT_DIR = "src/shader/"; // Could also be a separate 'bin' folder
 
-    static void main(String[] args) {
+    public static void main(String[] args) {
         System.out.println("--- Starting SPIR-V Asset Compilation ---");
 
         long compiler = shaderc_compiler_initialize();
@@ -28,11 +28,11 @@ public class SpirVCompiler {
         long options = shaderc_compile_options_initialize();
         shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_performance);
 
-        // Compile Vertex Shaders
-        compileShader(compiler, options, "vertex/entity.vert", shaderc_glsl_vertex_shader);
+        // Compile Vertex Shaders (glsl -> vertex)
+        compileShader(compiler, options, "glsl/vertex.vert", "vertex/vertex.spv", shaderc_glsl_vertex_shader);
 
-        // Compile Fragment Shaders
-        compileShader(compiler, options, "fragment/entity.frag", shaderc_glsl_fragment_shader);
+        // Compile Fragment Shaders (glsl -> fragment)
+        compileShader(compiler, options, "glsl/fragment.frag", "fragment/fragment.spv", shaderc_glsl_fragment_shader);
 
         shaderc_compile_options_release(options);
         shaderc_compiler_release(compiler);
@@ -40,8 +40,8 @@ public class SpirVCompiler {
         System.out.println("--- Compilation Complete ---");
     }
 
-    private static void compileShader(long compiler, long options, String relativePath, int shaderKind) {
-        File sourceFile = new File(SOURCE_DIR + relativePath);
+    private static void compileShader(long compiler, long options, String inputPath, String outputPath, int shaderKind) {
+        File sourceFile = new File(SOURCE_DIR + inputPath);
         if (!sourceFile.exists()) {
             System.err.println("Skipping: Cannot find " + sourceFile.getAbsolutePath());
             return;
@@ -62,8 +62,7 @@ public class SpirVCompiler {
             ByteBuffer spv = shaderc_result_get_bytes(result);
 
             // 4. Save to a .spv file
-            String outputPath = OUTPUT_DIR + relativePath.replace(".vert", ".spv").replace(".frag", ".spv");
-            File outputFile = new File(outputPath);
+            File outputFile = new File(OUTPUT_DIR + outputPath);
             outputFile.getParentFile().mkdirs(); // Ensure directories exist
 
             try (FileOutputStream fos = new FileOutputStream(outputFile);

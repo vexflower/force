@@ -289,8 +289,23 @@ public final class Display {
     public static int getWidth() { return width; }
     public static int getHeight() { return height; }
     public static void setShowFPSTitle(boolean show) { showFPSTitle = show; }
-    public static org.lwjgl.vulkan.VkDevice getDevice() { return vkDevice; }
-    public static org.lwjgl.vulkan.VkPhysicalDevice getPhysicalDevice() { return physicalDevice; }
+    public static VkDevice getDevice() { return vkDevice; }
+    public static VkPhysicalDevice getPhysicalDevice() { return physicalDevice; }
     public static long getSurface() { return surface; }
     public static long getWindow() { return window; }
+
+    public static VkQueue getPresentQueue()
+    {
+        return presentQueue;
+    }
+
+    public static int getGraphicsQueueFamilyIndex()
+    {
+        return graphicsQueueFamilyIndex;
+    }
+
+    public static VkQueue getGraphicsQueue()
+    {
+        return graphicsQueue;
+    }
 }
