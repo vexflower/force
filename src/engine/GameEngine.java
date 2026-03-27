@@ -1,56 +1,96 @@
-package engine; // Make sure this matches what HotswapManager is looking for!
+package engine;
 
 import hardware.Display;
 import hardware.Keyboard;
-import hotswap.EngineState;
-import lang.Mat4;
+import lang.GeomMath;
 import renderer.MasterRenderer;
-
-import static java.lang.Math.toRadians;
+import renderer.RenderState;
+import renderer.SharedState;
 
 public class GameEngine {
 
-    private boolean running = false;
-    private boolean hotswapRequested = false;
-    private EngineState currentState;
+    private static volatile boolean running = true;
+    private static final SharedState sharedState = new SharedState();
 
-    public static void main(String... args)
-    {
-
+    public static void main(String... args) {
         System.out.println("Engine initialized from Bootloader.");
 
-        // 1. Ignite the Hardware
+        // 1. Ignite the Hardware (Must be on main thread for macOS/Windows UI)
         Display.createDisplay(1280, 720);
         Display.setShowFPSTitle(true);
         MasterRenderer.setRenderer();
 
-        // 2. State Injection
-        // If state.persistentData contains a "player_rotation", load it here!
-        Mat4 mySpinningMatrix = new Mat4();
-        float currentRotation = 0;
+        // 2. Spawn the Logic/Physics Thread
+        Thread logicThread = new Thread(GameEngine::runLogicLoop, "Logic-Thread");
+        logicThread.start();
 
-        // 3. The Core Loop
-        while(!Display.shouldDisplayClose()) {
+        // 3. The Unlocked Render Loop (Runs as fast as your GPU allows)
+        while (!Display.shouldDisplayClose() && running) {
 
-            // Listen for a secret key combination to trigger a hotswap (e.g., F5)
-            if(Keyboard.isKeyDown(Keyboard.ZERO)) {
+            // Listen for hotswap secret key
+            if (Keyboard.isKeyDown(Keyboard.ZERO)) {
                 System.out.println("F5 Pressed: Engine signaling Bootloader for Hotswap...");
-
+                running = false;
             }
 
-            mySpinningMatrix.identity();
-            mySpinningMatrix.translate(0.0f, 0.0f, 0.5f);
+            // Grab the latest physics snapshot instantly. No locks.
+            RenderState currentFrame = sharedState.getFrontBuffer();
 
-            currentRotation += (float) toRadians(Display.getDeltaInSeconds() * 100f);
-            mySpinningMatrix.rotateY(currentRotation);
+            // Pass the extracted data to Vulkan
+            MasterRenderer.render(currentFrame.spinningTriangleTransform);
 
-            MasterRenderer.render(mySpinningMatrix);
             Display.updateDisplay();
         }
 
-        // 4. Graceful Teardown (Screen goes black temporarily)
+        // 4. Graceful Teardown
+        running = false;
+        try {
+            logicThread.join(); // Wait for physics to safely shut down
+        } catch (InterruptedException e) {
+            System.out.println(e.getMessage());
+        }
+
         MasterRenderer.destroy();
         Display.closeDisplay();
     }
 
+
+    /**
+     * This is your new GAME LOOP. It runs entirely independent of the framerate.
+     */
+    private static void runLogicLoop() {
+        float currentRotation = 0;
+        long lastTime = System.nanoTime();
+        final double nsPerTick = 1000000000.0 / 60.0; // Fixed 60 Ticks Per Second
+        double delta = 0;
+
+        while (running) {
+            long now = System.nanoTime();
+            delta += (now - lastTime) / nsPerTick;
+            lastTime = now;
+
+            // Catch up on missed physics ticks
+            while (delta >= 1) {
+
+                // 1. Grab the Back Buffer (The one the GPU isn't looking at)
+                RenderState backBuffer = sharedState.getBackBuffer();
+
+                // 2. Perform Game Logic & Physics
+                currentRotation += GeomMath.toRadians(2); // 2 degrees per tick
+
+                // 3. Write data to the Back Buffer
+                backBuffer.spinningTriangleTransform.identity();
+                backBuffer.spinningTriangleTransform.translate(0.0f, 0.0f, 0.5f);
+                backBuffer.spinningTriangleTransform.rotateY(currentRotation);
+
+                // 4. Publish the frame instantly
+                sharedState.swap();
+
+                delta--;
+            }
+
+            // Sleep slightly to prevent this thread from burning 100% of a CPU core
+            try { Thread.sleep(1); } catch (InterruptedException ignored) {}
+        }
+    }
 }

@@ -52,4 +52,5 @@ public final class FastMath {
         // Note: For extreme performance, ensure cos32(x) is not exactly 0.
         return sin32(x) / cos32(x);
     }
+
 }
