@@ -17,11 +17,9 @@ import static org.lwjgl.vulkan.KHRSurface.vkDestroySurfaceKHR;
 import static org.lwjgl.vulkan.KHRSurface.vkGetPhysicalDeviceSurfaceSupportKHR;
 import static org.lwjgl.vulkan.KHRSwapchain.VK_KHR_SWAPCHAIN_EXTENSION_NAME;
 import static org.lwjgl.vulkan.VK10.*;
+// === NEW: Required for Vulkan 1.2 Bindless Features ===
+import static org.lwjgl.vulkan.VK12.*;
 
-/**
- * AAA Vulkan Hardware and Window Context.
- * Pure Vulkan Implementation - Zero OpenGL.
- */
 public final class Display {
 
     private static int width = 1280;
@@ -29,26 +27,22 @@ public final class Display {
     private static long window;
     private static final String TITLE = "Vulkan Engine";
 
-    // Timing and FPS
     private static int frames;
     private static long lastFPSTime;
     private static boolean showFPSTitle = true;
     private static double lastFrameTime;
     private static double deltaInSeconds;
 
-    // Vulkan Core State
     private static VkInstance vkInstance;
     private static long surface;
     private static VkPhysicalDevice physicalDevice;
-    private static VkDevice vkDevice; // The Logical Device
+    private static VkDevice vkDevice;
 
-    // Vulkan Hardware Queues
     private static VkQueue graphicsQueue;
     private static VkQueue presentQueue;
     private static int graphicsQueueFamilyIndex = -1;
     private static int presentQueueFamilyIndex = -1;
 
-    // Input Hardware
     private static Keyboard keyboard;
     private static Mouse mouse;
     private static GLFWWindowSizeCallback windowSizeCallback;
@@ -60,7 +54,6 @@ public final class Display {
         width = (w == 0) ? 1280 : w;
         height = (h == 0) ? 720 : h;
 
-        // 1. Tell GLFW to completely ignore OpenGL
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
@@ -72,7 +65,6 @@ public final class Display {
             glfwSetWindowPos(window, (vidMode.width() - width) / 2, (vidMode.height() - height) / 2);
         }
 
-        // Initialize Hardware Listeners
         keyboard = new Keyboard();
         mouse = new Mouse();
         glfwSetKeyCallback(window, keyboard);
@@ -85,12 +77,10 @@ public final class Display {
             public void invoke(long window, int newWidth, int newHeight) {
                 Display.width = newWidth;
                 Display.height = newHeight;
-                // Note: In Vulkan, resizing requires completely destroying and rebuilding the Swapchain!
             }
         };
         glfwSetWindowSizeCallback(window, windowSizeCallback);
 
-        // 2. Boot the Vulkan Pipeline
         initVulkan();
 
         lastFrameTime = glfwGetTime();
@@ -115,7 +105,9 @@ public final class Display {
             appInfo.applicationVersion(VK_MAKE_VERSION(1, 0, 0));
             appInfo.pEngineName(stack.UTF8("Force Engine"));
             appInfo.engineVersion(VK_MAKE_VERSION(1, 0, 0));
-            appInfo.apiVersion(VK_API_VERSION_1_0);
+
+            // === UPGRADE TO VULKAN 1.2 FOR BINDLESS TEXTURING ===
+            appInfo.apiVersion(VK_API_VERSION_1_2);
 
             PointerBuffer glfwExtensions = GLFWVulkan.glfwGetRequiredInstanceExtensions();
             if (glfwExtensions == null) throw new RuntimeException("Failed to find GLFW Vulkan extensions!");
@@ -130,7 +122,7 @@ public final class Display {
                 throw new RuntimeException("Failed to create Vulkan instance!");
             }
             vkInstance = new VkInstance(instancePtr.get(0), createInfo);
-            System.out.println("Vulkan Instance successfully created!");
+            System.out.println("Vulkan Instance successfully created (v1.2)!");
         }
     }
 
@@ -141,7 +133,6 @@ public final class Display {
                 throw new RuntimeException("Failed to create window surface!");
             }
             surface = pSurface.get(0);
-            System.out.println("Vulkan Window Surface attached!");
         }
     }
 
@@ -196,8 +187,6 @@ public final class Display {
     private static void createLogicalDevice() {
         try (MemoryStack stack = stackPush()) {
 
-            // Usually, the graphics and present queues are the exact same index.
-            // If they are different, we must create two separate queues.
             int[] uniqueQueueFamilies;
             if (graphicsQueueFamilyIndex == presentQueueFamilyIndex) {
                 uniqueQueueFamilies = new int[] { graphicsQueueFamilyIndex };
@@ -210,30 +199,43 @@ public final class Display {
                 VkDeviceQueueCreateInfo queueInfo = queueCreateInfos.get(i);
                 queueInfo.sType(VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO);
                 queueInfo.queueFamilyIndex(uniqueQueueFamilies[i]);
-                queueInfo.pQueuePriorities(stack.floats(1.0f)); // Give maximum priority to our graphics queue
+                queueInfo.pQueuePriorities(stack.floats(1.0f));
             }
 
-            // Features we want to ask the GPU for (e.g., Anisotropic filtering, geometry shaders)
-            // For now, we leave it blank/default
             VkPhysicalDeviceFeatures deviceFeatures = VkPhysicalDeviceFeatures.calloc(stack);
+
+            // =========================================================================
+            // === BINDLESS TEXTURING HARDWARE UNLOCK ===
+            // =========================================================================
+            VkPhysicalDeviceVulkan12Features bindlessFeatures = VkPhysicalDeviceVulkan12Features.calloc(stack);
+            bindlessFeatures.sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
+
+            // Allow updating the texture array after it's been bound
+            bindlessFeatures.descriptorBindingPartiallyBound(true);
+            // Allow an array of 4096 textures where maybe only a few are actually loaded
+            bindlessFeatures.runtimeDescriptorArray(true);
+            // Allow shaders to dynamically index into the array
+            bindlessFeatures.shaderSampledImageArrayNonUniformIndexing(true);
+            // =========================================================================
 
             VkDeviceCreateInfo createInfo = VkDeviceCreateInfo.calloc(stack);
             createInfo.sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
+
+            // === INJECT BINDLESS FEATURES INTO THE C-MEMORY CHAIN ===
+            createInfo.pNext(bindlessFeatures.address());
+
             createInfo.pQueueCreateInfos(queueCreateInfos);
             createInfo.pEnabledFeatures(deviceFeatures);
 
-            // CRITICAL: We must request the Swapchain extension so we can actually draw to the screen later!
             PointerBuffer extensions = stack.pointers(stack.UTF8(VK_KHR_SWAPCHAIN_EXTENSION_NAME));
             createInfo.ppEnabledExtensionNames(extensions);
 
-            // Create the Logical Device
             PointerBuffer pDevice = stack.mallocPointer(1);
             if (vkCreateDevice(physicalDevice, createInfo, null, pDevice) != VK_SUCCESS) {
                 throw new RuntimeException("Failed to create logical device!");
             }
             vkDevice = new VkDevice(pDevice.get(0), physicalDevice, createInfo);
 
-            // Retrieve the hardware queue pointers
             PointerBuffer pQueue = stack.mallocPointer(1);
             vkGetDeviceQueue(vkDevice, graphicsQueueFamilyIndex, 0, pQueue);
             graphicsQueue = new VkQueue(pQueue.get(0), vkDevice);
@@ -241,7 +243,7 @@ public final class Display {
             vkGetDeviceQueue(vkDevice, presentQueueFamilyIndex, 0, pQueue);
             presentQueue = new VkQueue(pQueue.get(0), vkDevice);
 
-            System.out.println("Logical Device & Hardware Queues established.");
+            System.out.println("Logical Device & Hardware Queues established with Bindless Support.");
         }
     }
 
@@ -268,7 +270,6 @@ public final class Display {
         keyboard.close();
         if (windowSizeCallback != null) windowSizeCallback.free();
 
-        // Vulkan Memory Management is ruthless. Destroy in exact reverse order!
         if (vkDevice != null) {
             vkDestroyDevice(vkDevice, null);
         }
@@ -281,10 +282,7 @@ public final class Display {
         glfwTerminate();
     }
 
-    public static boolean shouldDisplayClose() {
-        return glfwWindowShouldClose(window);
-    }
-
+    public static boolean shouldDisplayClose() { return glfwWindowShouldClose(window); }
     public static float getDeltaInSeconds() { return (float) deltaInSeconds; }
     public static int getWidth() { return width; }
     public static int getHeight() { return height; }
@@ -293,19 +291,7 @@ public final class Display {
     public static VkPhysicalDevice getPhysicalDevice() { return physicalDevice; }
     public static long getSurface() { return surface; }
     public static long getWindow() { return window; }
-
-    public static VkQueue getPresentQueue()
-    {
-        return presentQueue;
-    }
-
-    public static int getGraphicsQueueFamilyIndex()
-    {
-        return graphicsQueueFamilyIndex;
-    }
-
-    public static VkQueue getGraphicsQueue()
-    {
-        return graphicsQueue;
-    }
+    public static VkQueue getPresentQueue() { return presentQueue; }
+    public static int getGraphicsQueueFamilyIndex() { return graphicsQueueFamilyIndex; }
+    public static VkQueue getGraphicsQueue() { return graphicsQueue; }
 }

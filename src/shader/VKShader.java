@@ -15,6 +15,8 @@ import java.util.List;
 import static org.lwjgl.system.MemoryStack.stackPush;
 import static org.lwjgl.system.MemoryUtil.memAllocFloat;
 import static org.lwjgl.vulkan.VK10.*;
+// [CHANGE 1]: We need Vulkan 1.2 imports for Bindless features!
+import static org.lwjgl.vulkan.VK12.*;
 
 /**
  * AAA Vulkan Shader Manager.
@@ -26,6 +28,81 @@ public final class VKShader {
 
     // 16 floats = 64 bytes. Kept off-heap for zero-allocation Matrix pushing.
     private static final FloatBuffer PUSH_CONSTANT_BUFFER = memAllocFloat(16);
+
+    // =========================================================================================
+    // [CHANGE 2]: GLOBAL BINDLESS TEXTURE ARCHITECTURE (The "Phonebook")
+    // =========================================================================================
+    public static final int MAX_BINDLESS_TEXTURES = 4096;
+    public static long bindlessDescriptorSetLayout;
+    public static long bindlessDescriptorPool;
+    public static long bindlessDescriptorSet;
+
+    /**
+     * MUST be called immediately after the Logical Device is created in Display.java,
+     * before compiling any pipelines.
+     */
+    public static void initBindlessHardware(VkDevice device) {
+        try (MemoryStack stack = stackPush()) {
+            System.out.println("Initializing Global Bindless Texture Array (" + MAX_BINDLESS_TEXTURES + " slots)...");
+
+            // 1. Describe the Layout (Binding 0 = Array of 4096 Textures)
+            VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(1, stack);
+            bindings.binding(0);
+            bindings.descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            bindings.descriptorCount(MAX_BINDLESS_TEXTURES);
+            bindings.stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
+
+            // 2. Enable Bindless Features for this Layout (Allows us to update slots while running)
+            VkDescriptorSetLayoutBindingFlagsCreateInfo layoutFlags = VkDescriptorSetLayoutBindingFlagsCreateInfo.calloc(stack);
+            layoutFlags.sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO);
+            layoutFlags.pBindingFlags(stack.ints(
+                    VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+                            VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT
+            ));
+
+            VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack);
+            layoutInfo.sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
+            layoutInfo.pBindings(bindings);
+            layoutInfo.flags(VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
+            layoutInfo.pNext(layoutFlags.address());
+
+            LongBuffer pSetLayout = stack.mallocLong(1);
+            if (vkCreateDescriptorSetLayout(device, layoutInfo, null, pSetLayout) != VK_SUCCESS) {
+                throw new RuntimeException("Failed to create Bindless Descriptor Set Layout!");
+            }
+            bindlessDescriptorSetLayout = pSetLayout.get(0);
+
+            // 3. Allocate the Global Pool
+            VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(1, stack);
+            poolSizes.type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            poolSizes.descriptorCount(MAX_BINDLESS_TEXTURES);
+
+            VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack);
+            poolInfo.sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO);
+            poolInfo.pPoolSizes(poolSizes);
+            poolInfo.maxSets(1); // We only need ONE global set!
+            poolInfo.flags(VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT);
+
+            LongBuffer pPool = stack.mallocLong(1);
+            if (vkCreateDescriptorPool(device, poolInfo, null, pPool) != VK_SUCCESS) {
+                throw new RuntimeException("Failed to create Bindless Descriptor Pool!");
+            }
+            bindlessDescriptorPool = pPool.get(0);
+
+            // 4. Allocate the single Global Descriptor Set (This is the actual "Phonebook" handle)
+            VkDescriptorSetAllocateInfo allocInfo = VkDescriptorSetAllocateInfo.calloc(stack);
+            allocInfo.sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO);
+            allocInfo.descriptorPool(bindlessDescriptorPool);
+            allocInfo.pSetLayouts(stack.longs(bindlessDescriptorSetLayout));
+
+            LongBuffer pDescriptorSet = stack.mallocLong(1);
+            if (vkAllocateDescriptorSets(device, allocInfo, pDescriptorSet) != VK_SUCCESS) {
+                throw new RuntimeException("Failed to allocate Bindless Descriptor Set!");
+            }
+            bindlessDescriptorSet = pDescriptorSet.get(0);
+        }
+    }
+    // =========================================================================================
 
     public static abstract class ShaderPipeline {
         public long pipelineLayout;
@@ -41,76 +118,45 @@ public final class VKShader {
             try (MemoryStack stack = stackPush()) {
                 // 1. Programmable Shader Stages
                 VkPipelineShaderStageCreateInfo.Buffer shaderStages = VkPipelineShaderStageCreateInfo.calloc(2, stack);
+                shaderStages.get(0).sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO).stage(VK_SHADER_STAGE_VERTEX_BIT).module(vertModule).pName(stack.UTF8("main"));
+                shaderStages.get(1).sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO).stage(VK_SHADER_STAGE_FRAGMENT_BIT).module(fragModule).pName(stack.UTF8("main"));
 
-                shaderStages.get(0).sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
-                shaderStages.get(0).stage(VK_SHADER_STAGE_VERTEX_BIT);
-                shaderStages.get(0).module(vertModule);
-                shaderStages.get(0).pName(stack.UTF8("main"));
-
-                shaderStages.get(1).sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
-                shaderStages.get(1).stage(VK_SHADER_STAGE_FRAGMENT_BIT);
-                shaderStages.get(1).module(fragModule);
-                shaderStages.get(1).pName(stack.UTF8("main"));
-
-                // 2. Vertex Input (EMPTY for now! We are hardcoding the triangle in the shader)
-                VkPipelineVertexInputStateCreateInfo vertexInputInfo = VkPipelineVertexInputStateCreateInfo.calloc(stack);
-                vertexInputInfo.sType(VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO);
+                // 2. Vertex Input
+                VkPipelineVertexInputStateCreateInfo vertexInputInfo = VkPipelineVertexInputStateCreateInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO);
 
                 // 3. Input Assembly (Triangles)
-                VkPipelineInputAssemblyStateCreateInfo inputAssembly = VkPipelineInputAssemblyStateCreateInfo.calloc(stack);
-                inputAssembly.sType(VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO);
-                inputAssembly.topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-                inputAssembly.primitiveRestartEnable(false);
+                VkPipelineInputAssemblyStateCreateInfo inputAssembly = VkPipelineInputAssemblyStateCreateInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO).topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST).primitiveRestartEnable(false);
 
                 // 4. Viewport & Scissor
-                VkViewport.Buffer viewport = VkViewport.calloc(1, stack);
-                viewport.x(0.0f).y(0.0f).width(extent.width()).height(extent.height()).minDepth(0.0f).maxDepth(1.0f);
-
-                VkRect2D.Buffer scissor = VkRect2D.calloc(1, stack);
-                scissor.offset(VkOffset2D.calloc(stack).set(0, 0)).extent(extent);
-
-                VkPipelineViewportStateCreateInfo viewportState = VkPipelineViewportStateCreateInfo.calloc(stack);
-                viewportState.sType(VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO);
-                viewportState.pViewports(viewport);
-                viewportState.pScissors(scissor);
+                VkViewport.Buffer viewport = VkViewport.calloc(1, stack).x(0.0f).y(0.0f).width(extent.width()).height(extent.height()).minDepth(0.0f).maxDepth(1.0f);
+                VkRect2D.Buffer scissor = VkRect2D.calloc(1, stack).offset(VkOffset2D.calloc(stack).set(0, 0)).extent(extent);
+                VkPipelineViewportStateCreateInfo viewportState = VkPipelineViewportStateCreateInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO).pViewports(viewport).pScissors(scissor);
 
                 // 5. Rasterizer
-                VkPipelineRasterizationStateCreateInfo rasterizer = VkPipelineRasterizationStateCreateInfo.calloc(stack);
-                rasterizer.sType(VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO);
-                rasterizer.depthClampEnable(false);
-                rasterizer.rasterizerDiscardEnable(false);
-                rasterizer.polygonMode(VK_POLYGON_MODE_FILL);
-                rasterizer.lineWidth(1.0f);
-
-                // CRITICAL FIX: Disable culling so we can see both sides of the spinning triangle!
-                rasterizer.cullMode(VK_CULL_MODE_NONE);
-                rasterizer.frontFace(VK_FRONT_FACE_CLOCKWISE);
+                VkPipelineRasterizationStateCreateInfo rasterizer = VkPipelineRasterizationStateCreateInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO).depthClampEnable(false).rasterizerDiscardEnable(false).polygonMode(VK_POLYGON_MODE_FILL).lineWidth(1.0f).cullMode(VK_CULL_MODE_NONE).frontFace(VK_FRONT_FACE_CLOCKWISE);
 
                 // 6. Multisampling
-                VkPipelineMultisampleStateCreateInfo multisampling = VkPipelineMultisampleStateCreateInfo.calloc(stack);
-                multisampling.sType(VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO);
-                multisampling.sampleShadingEnable(false);
-                multisampling.rasterizationSamples(VK_SAMPLE_COUNT_1_BIT);
+                VkPipelineMultisampleStateCreateInfo multisampling = VkPipelineMultisampleStateCreateInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO).sampleShadingEnable(false).rasterizationSamples(VK_SAMPLE_COUNT_1_BIT);
 
                 // 7. Color Blending
-                VkPipelineColorBlendAttachmentState.Buffer colorBlendAttachment = VkPipelineColorBlendAttachmentState.calloc(1, stack);
-                colorBlendAttachment.colorWriteMask(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
-                colorBlendAttachment.blendEnable(false);
-
-                VkPipelineColorBlendStateCreateInfo colorBlending = VkPipelineColorBlendStateCreateInfo.calloc(stack);
-                colorBlending.sType(VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO);
-                colorBlending.logicOpEnable(false);
-                colorBlending.pAttachments(colorBlendAttachment);
+                VkPipelineColorBlendAttachmentState.Buffer colorBlendAttachment = VkPipelineColorBlendAttachmentState.calloc(1, stack).colorWriteMask(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT).blendEnable(false);
+                VkPipelineColorBlendStateCreateInfo colorBlending = VkPipelineColorBlendStateCreateInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO).logicOpEnable(false).pAttachments(colorBlendAttachment);
 
                 // 8. Pipeline Layout (Push Constants setup)
                 VkPushConstantRange.Buffer pushConstants = VkPushConstantRange.calloc(1, stack);
                 pushConstants.stageFlags(VK_SHADER_STAGE_VERTEX_BIT);
                 pushConstants.offset(0);
-                pushConstants.size(64); // 64 bytes = exactly one 16-float Mat4
+                pushConstants.size(64);
 
                 VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkPipelineLayoutCreateInfo.calloc(stack);
                 pipelineLayoutInfo.sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO);
                 pipelineLayoutInfo.pPushConstantRanges(pushConstants);
+
+                // =========================================================================================
+                // [CHANGE 3]: Tell the Pipeline about the Phonebook!
+                // Without this line, the shader will crash when it tries to read the texture array.
+                // =========================================================================================
+                pipelineLayoutInfo.pSetLayouts(stack.longs(bindlessDescriptorSetLayout));
 
                 LongBuffer pPipelineLayout = stack.mallocLong(1);
                 if (vkCreatePipelineLayout(device, pipelineLayoutInfo, null, pPipelineLayout) != VK_SUCCESS) {
