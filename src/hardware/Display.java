@@ -251,35 +251,32 @@ public final class Display {
                 queueInfo.pQueuePriorities(stack.floats(1.0f));
             }
 
+            // 1. Standard Vulkan 1.0 Features
             VkPhysicalDeviceFeatures deviceFeatures = VkPhysicalDeviceFeatures.calloc(stack);
 
-            // =========================================================================
-            // === BINDLESS TEXTURING HARDWARE UNLOCK ===
-            // =========================================================================
+            // 2. Vulkan 1.2 Bindless Features
             VkPhysicalDeviceVulkan12Features bindlessFeatures = VkPhysicalDeviceVulkan12Features.calloc(stack);
             bindlessFeatures.sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
-
-            // Allow updating the texture array after it's been bound
             bindlessFeatures.descriptorBindingPartiallyBound(true);
-            // Allow an array of 4096 textures where maybe only a few are actually loaded
             bindlessFeatures.runtimeDescriptorArray(true);
-            // Allow shaders to dynamically index into the array
             bindlessFeatures.shaderSampledImageArrayNonUniformIndexing(true);
-            // =========================================================================
+            bindlessFeatures.descriptorBindingSampledImageUpdateAfterBind(true);
 
-            VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures = VkPhysicalDeviceDescriptorIndexingFeatures.calloc(stack);
-            indexingFeatures.sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES);
-            indexingFeatures.descriptorBindingPartiallyBound(true); // This tells Vulkan to ignore empty slots!
+            // 3. NEW: The Modern Feature Wrapper (Vulkan 1.1+)
+            // This safely bundles the 1.0 features and the 1.2 features together
+            VkPhysicalDeviceFeatures2 features2 = VkPhysicalDeviceFeatures2.calloc(stack);
+            features2.sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
+            features2.features(deviceFeatures);
+            features2.pNext(bindlessFeatures.address());
 
+            // 4. Device Creation
             VkDeviceCreateInfo createInfo = VkDeviceCreateInfo.calloc(stack);
             createInfo.sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
-
-            // === INJECT BINDLESS FEATURES INTO THE C-MEMORY CHAIN ===
-            createInfo.pNext(bindlessFeatures.address());
-            createInfo.pNext(indexingFeatures.address());
-
             createInfo.pQueueCreateInfos(queueCreateInfos);
-            createInfo.pEnabledFeatures(deviceFeatures);
+
+            // CRITICAL: We attach our master wrapper to pNext.
+            // We intentionally do NOT call createInfo.pEnabledFeatures() so it remains NULL!
+            createInfo.pNext(features2.address());
 
             PointerBuffer extensions = stack.pointers(stack.UTF8(VK_KHR_SWAPCHAIN_EXTENSION_NAME));
             createInfo.ppEnabledExtensionNames(extensions);
