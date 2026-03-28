@@ -5,12 +5,12 @@ import lang.Mat4;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.*;
+import util.FastList;
 
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
-import java.util.List;
 
 import static org.lwjgl.system.MemoryStack.stackPush;
 import static org.lwjgl.system.MemoryUtil.memAllocFloat;
@@ -121,11 +121,25 @@ public final class VKShader {
                 shaderStages.get(0).sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO).stage(VK_SHADER_STAGE_VERTEX_BIT).module(vertModule).pName(stack.UTF8("main"));
                 shaderStages.get(1).sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO).stage(VK_SHADER_STAGE_FRAGMENT_BIT).module(fragModule).pName(stack.UTF8("main"));
 
-                // 2. Vertex Input
-                VkPipelineVertexInputStateCreateInfo vertexInputInfo = VkPipelineVertexInputStateCreateInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO);
+                // [CHANGED: Tell Vulkan exactly how to read our Positions (Binding 0) and UVs (Binding 1)]
+                VkVertexInputBindingDescription.Buffer bindingDescription = VkVertexInputBindingDescription.calloc(2, stack);
+                bindingDescription.get(0).binding(0).stride(3 * 4).inputRate(VK_VERTEX_INPUT_RATE_VERTEX); // 3 floats for XYZ
+                bindingDescription.get(1).binding(1).stride(2 * 4).inputRate(VK_VERTEX_INPUT_RATE_VERTEX); // 2 floats for UV
+
+                VkVertexInputAttributeDescription.Buffer attributeDescription = VkVertexInputAttributeDescription.calloc(2, stack);
+                // Layout 0: Positions
+                attributeDescription.get(0).binding(0).location(0).format(VK_FORMAT_R32G32B32_SFLOAT).offset(0);
+                // Layout 1: UVs
+                attributeDescription.get(1).binding(1).location(1).format(VK_FORMAT_R32G32_SFLOAT).offset(0);
+
+                VkPipelineVertexInputStateCreateInfo vertexInputInfo = VkPipelineVertexInputStateCreateInfo.calloc(stack);
+                vertexInputInfo.sType(VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO);
+                vertexInputInfo.pVertexBindingDescriptions(bindingDescription);
+                vertexInputInfo.pVertexAttributeDescriptions(attributeDescription);
 
                 // 3. Input Assembly (Triangles)
                 VkPipelineInputAssemblyStateCreateInfo inputAssembly = VkPipelineInputAssemblyStateCreateInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO).topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST).primitiveRestartEnable(false);
+
 
                 // 4. Viewport & Scissor
                 VkViewport.Buffer viewport = VkViewport.calloc(1, stack).x(0.0f).y(0.0f).width(extent.width()).height(extent.height()).minDepth(0.0f).maxDepth(1.0f);
@@ -143,10 +157,11 @@ public final class VKShader {
                 VkPipelineColorBlendStateCreateInfo colorBlending = VkPipelineColorBlendStateCreateInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO).logicOpEnable(false).pAttachments(colorBlendAttachment);
 
                 // 8. Pipeline Layout (Push Constants setup)
+                // [CHANGED: Increase Push Constant size from 64 to 68 bytes, and expose it to the Fragment Shader]
                 VkPushConstantRange.Buffer pushConstants = VkPushConstantRange.calloc(1, stack);
-                pushConstants.stageFlags(VK_SHADER_STAGE_VERTEX_BIT);
+                pushConstants.stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
                 pushConstants.offset(0);
-                pushConstants.size(64);
+                pushConstants.size(68); // 64 for Mat4 + 4 for Int
 
                 VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkPipelineLayoutCreateInfo.calloc(stack);
                 pipelineLayoutInfo.sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO);
@@ -256,6 +271,25 @@ public final class VKShader {
             super(device, renderPass, extent, "vertex", "fragment");
         }
 
+        // [NEW: Fast-path for pushing matrices directly from the flat RenderState array]
+        public static void loadTransformationMatrixArray(VkCommandBuffer commandBuffer, float[] matrixData, int offset) {
+            // 1. Reset our zero-allocation off-heap buffer
+            PUSH_CONSTANT_BUFFER.clear();
+
+            // 2. Dump exactly 16 floats (one Mat4) into the C-buffer
+            PUSH_CONSTANT_BUFFER.put(matrixData, offset, 16);
+            PUSH_CONSTANT_BUFFER.flip();
+
+            // 3. Blast it to the GPU Push Constants memory!
+            vkCmdPushConstants(
+                    commandBuffer,
+                    pipeline.pipelineLayout,
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                    pipeline.matrixOffset,
+                    PUSH_CONSTANT_BUFFER
+            );
+        }
+
         @Override
         protected void defineByteOffsets() {
             this.matrixOffset = 0;
@@ -266,7 +300,7 @@ public final class VKShader {
             loadMatrix(commandBuffer, pipeline.matrixOffset, matrix);
         }
 
-        public static void bindLights(VkCommandBuffer commandBuffer, List<Light> lights) {
+        public static void bindLights(VkCommandBuffer commandBuffer, FastList<Light> lights) {
             // Descriptor sets will go here
         }
     }

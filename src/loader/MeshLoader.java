@@ -29,6 +29,8 @@ public final class MeshLoader {
 
     // [CHANGED: 3] Vulkan needs to know exactly how many indices to draw during the render loop
     public static int[] indexCounts = new int[128];
+    private static long[] uvBuffers = new long[128];
+    private static long[] uvMemories = new long[128];
 
     private static int meshCount = 0;
 
@@ -51,6 +53,10 @@ public final class MeshLoader {
         long[] iData = createBufferFromIntArray(mesh.indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, commandPool);
         indexBuffers[id] = iData[0];
         indexMemories[id] = iData[1];
+
+        long[] uvData = createBufferFromFloatArray(mesh.textures, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, commandPool);
+        uvBuffers[id] = uvData[0];
+        uvMemories[id] = uvData[1];
 
         indexCounts[id] = mesh.indices.length;
 
@@ -183,4 +189,5 @@ public final class MeshLoader {
     public static long getVertexBuffer(int id) { return vertexBuffers[id]; }
     public static long getIndexBuffer(int id) { return indexBuffers[id]; }
     public static int getIndexCount(int id) { return indexCounts[id]; }
+    public static long getUvBuffer(int id) { return uvBuffers[id]; }
 }

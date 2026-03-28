@@ -43,7 +43,7 @@ public class GameEngine {
             RenderState currentFrame = sharedState.getFrontBuffer();
 
             // Pass the extracted data to Vulkan
-            MasterRenderer.render(currentFrame.spinningTriangleTransform);
+            MasterRenderer.render(currentFrame);
 
             Display.updateDisplay();
         }
@@ -78,6 +78,21 @@ public class GameEngine {
                 // [CHANGED] We delegate all logic to the Scene!
                 float deltaInSeconds = 1.0f / 60.0f;
                 currentScene.update(deltaInSeconds);
+
+                // [NEW: Snapshot the state for the GPU!]
+                RenderState backBuffer = sharedState.getBackBuffer();
+                backBuffer.entityCount = currentScene.activeEntities.size();
+
+                for (int i = 0; i < backBuffer.entityCount; i++) {
+                    int eId = currentScene.activeEntities.get(i);
+                    backBuffer.meshIds[i] = environment.RendererManager.meshIds.get(eId);
+                    backBuffer.textureIds[i] = environment.RendererManager.diffuseTextureIds.get(eId);
+
+                    // Copy the 16 floats directly to avoid GC allocations
+                    for (int f = 0; f < 16; f++) {
+                        backBuffer.transforms[(i * 16) + f] = environment.RendererManager.transforms.get((eId * 16) + f);
+                    }
+                }
 
                 // We still tell the sharedState to swap so the Render Thread grabs the newest data
                 sharedState.swap();

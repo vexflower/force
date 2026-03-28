@@ -1,29 +1,21 @@
 #version 450
 
-// The 64-byte Push Constant we send from VKShader.java!
+// [CHANGED: Expanded to hold the Mat4 (64 bytes) + the Texture ID (4 bytes)]
 layout(push_constant) uniform PushConstants {
     mat4 transformationMatrix;
+    int textureId;
 } push;
 
-// Hardcoded vertices so we don't need Vulkan VBO memory allocators yet
-vec2 positions[3] = vec2[](
-vec2(0.0, -0.5),
-vec2(0.5, 0.5),
-vec2(-0.5, 0.5)
-);
+// [CHANGED: Pulling directly from your MeshLoader's buffers!]
+layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec2 inTexCoord;
 
-// Hardcoded vibrant colors!
-vec3 colors[3] = vec3[](
-vec3(1.0, 0.0, 0.0), // Red
-vec3(0.0, 1.0, 0.0), // Green
-vec3(0.0, 0.0, 1.0)  // Blue
-);
-
-// Sent to the fragment shader
-layout(location = 0) out vec3 fragColor;
+// Pass these to the fragment shader
+layout(location = 0) out vec2 fragTexCoord;
+layout(location = 1) out flat int fragTextureId; // 'flat' means don't interpolate integers!
 
 void main() {
-    // Apply our Java Mat4 to the hardcoded coordinates
-    gl_Position = push.transformationMatrix * vec4(positions[gl_VertexIndex], 0.0, 1.0);
-    fragColor = colors[gl_VertexIndex];
+    gl_Position = push.transformationMatrix * vec4(inPosition, 1.0);
+    fragTexCoord = inTexCoord;
+    fragTextureId = push.textureId;
 }

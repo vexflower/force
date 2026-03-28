@@ -1,7 +1,6 @@
 package renderer;
 
 import hardware.Display;
-import lang.Mat4;
 import model.Mesh;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
@@ -348,7 +347,7 @@ public class MasterRenderer {
         }
     }
 
-    public static void render(Mat4 transform) {
+    public static void render(RenderState state) {
         VkDevice device = Display.getDevice();
 
         vkWaitForFences(device, inFlightFences[currentFrame], true, ~0L);
@@ -381,15 +380,39 @@ public class MasterRenderer {
 
         // === ZERO-GC BINDLESS BINDING ===
         // This attaches the 4096 texture pointers to the shader every frame
+        shader.VKShader.bind(shader.VKShader.EntityShaderPipeline.pipeline, currentCmdBuffer);
+
+        // Bind the Global 4096 Texture Array
         try (MemoryStack stack = MemoryStack.stackPush()) {
             vkCmdBindDescriptorSets(currentCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     shader.VKShader.EntityShaderPipeline.pipeline.pipelineLayout,
                     0, stack.longs(shader.VKShader.bindlessDescriptorSet), null);
+
+            // [CHANGED: Iterate through all active entities in the RenderState!]
+            for (int i = 0; i < state.entityCount; i++) {
+                int meshId = state.meshIds[i];
+                int texId = state.textureIds[i];
+
+                // 1. Bind Vertices (Binding 0 = Positions, Binding 1 = UVs)
+                LongBuffer vertexBuffers = stack.longs(loader.MeshLoader.getVertexBuffer(meshId), loader.MeshLoader.getUvBuffer(meshId));
+                LongBuffer offsets = stack.longs(0, 0);
+                vkCmdBindVertexBuffers(currentCmdBuffer, 0, vertexBuffers, offsets);
+
+                // 2. Bind Indices
+                vkCmdBindIndexBuffer(currentCmdBuffer, loader.MeshLoader.getIndexBuffer(meshId), 0, VK_INDEX_TYPE_UINT32);
+
+                // 3. Push the Matrix (0 to 63 bytes)
+                // (Assuming you made a loadMatrix helper that takes the float[] array and the offset 'i * 16')
+                shader.VKShader.EntityShaderPipeline.loadTransformationMatrixArray(currentCmdBuffer, state.transforms, i * 16);
+
+                // 4. Push the Texture ID (64 to 67 bytes)
+                vkCmdPushConstants(currentCmdBuffer, shader.VKShader.EntityShaderPipeline.pipeline.pipelineLayout,
+                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 64, stack.ints(texId));
+
+                // 5. Draw!
+                vkCmdDrawIndexed(currentCmdBuffer, loader.MeshLoader.getIndexCount(meshId), 1, 0, 0, 0);
+            }
         }
-
-        shader.VKShader.EntityShaderPipeline.loadTransformationMatrix(currentCmdBuffer, transform);
-
-        vkCmdDraw(currentCmdBuffer, 3, 1, 0, 0);
 
         vkCmdEndRenderPass(currentCmdBuffer);
         if (vkEndCommandBuffer(currentCmdBuffer) != VK_SUCCESS) {

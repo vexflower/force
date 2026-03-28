@@ -19,6 +19,10 @@ import static org.lwjgl.vulkan.KHRSwapchain.VK_KHR_SWAPCHAIN_EXTENSION_NAME;
 import static org.lwjgl.vulkan.VK10.*;
 // === NEW: Required for Vulkan 1.2 Bindless Features ===
 import static org.lwjgl.vulkan.VK12.*;
+// Add these right below your other imports in Display.java
+import org.lwjgl.vulkan.VkDebugUtilsMessengerCallbackDataEXT;
+import org.lwjgl.vulkan.VkDebugUtilsMessengerCreateInfoEXT;
+import static org.lwjgl.vulkan.EXTDebugUtils.*;
 
 public final class Display {
 
@@ -46,6 +50,9 @@ public final class Display {
     private static Keyboard keyboard;
     private static Mouse mouse;
     private static GLFWWindowSizeCallback windowSizeCallback;
+    // [NEW: Validation Layer Control]
+    public static final boolean ENABLE_VALIDATION_LAYERS = true;
+    private static long debugMessenger;
 
     private Display() {}
 
@@ -92,9 +99,37 @@ public final class Display {
             throw new RuntimeException("ERROR: Vulkan is not supported on this device!");
         }
         createInstance();
+        setupDebugMessenger();
         createSurface();
         pickPhysicalDevice();
         createLogicalDevice();
+    }
+
+    // [NEW: The Debug Callback]
+    private static void setupDebugMessenger() {
+        if (!ENABLE_VALIDATION_LAYERS) return;
+
+        try (MemoryStack stack = stackPush()) {
+            VkDebugUtilsMessengerCreateInfoEXT createInfo = VkDebugUtilsMessengerCreateInfoEXT.calloc(stack);
+            createInfo.sType(VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT);
+
+            // We want to see Warnings and Errors (ignoring verbose info spam)
+            createInfo.messageSeverity(VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT);
+            createInfo.messageType(VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT);
+
+            // The actual Java Lambda that gets called when Vulkan detects an error
+            createInfo.pfnUserCallback((messageSeverity, messageTypes, pCallbackData, pUserData) -> {
+                VkDebugUtilsMessengerCallbackDataEXT callbackData = VkDebugUtilsMessengerCallbackDataEXT.create(pCallbackData);
+                System.err.println("\n[VULKAN VALIDATION LAYER] " + callbackData.pMessageString());
+                return VK_FALSE;
+            });
+
+            LongBuffer pDebugMessenger = stack.longs(VK_NULL_HANDLE);
+            if (vkCreateDebugUtilsMessengerEXT(vkInstance, createInfo, null, pDebugMessenger) != VK_SUCCESS) {
+                throw new RuntimeException("Failed to set up debug messenger!");
+            }
+            debugMessenger = pDebugMessenger.get(0);
+        }
     }
 
     private static void createInstance() {
@@ -105,17 +140,31 @@ public final class Display {
             appInfo.applicationVersion(VK_MAKE_VERSION(1, 0, 0));
             appInfo.pEngineName(stack.UTF8("Force Engine"));
             appInfo.engineVersion(VK_MAKE_VERSION(1, 0, 0));
-
-            // === UPGRADE TO VULKAN 1.2 FOR BINDLESS TEXTURING ===
             appInfo.apiVersion(VK_API_VERSION_1_2);
 
             PointerBuffer glfwExtensions = GLFWVulkan.glfwGetRequiredInstanceExtensions();
             if (glfwExtensions == null) throw new RuntimeException("Failed to find GLFW Vulkan extensions!");
 
+            // [CHANGED: Add the Debug Extension if Validation is enabled]
+            PointerBuffer requiredExtensions;
+            if (ENABLE_VALIDATION_LAYERS) {
+                requiredExtensions = stack.mallocPointer(glfwExtensions.capacity() + 1);
+                requiredExtensions.put(glfwExtensions);
+                requiredExtensions.put(stack.UTF8(VK_EXT_DEBUG_UTILS_EXTENSION_NAME));
+                requiredExtensions.flip();
+            } else {
+                requiredExtensions = glfwExtensions;
+            }
+
             VkInstanceCreateInfo createInfo = VkInstanceCreateInfo.calloc(stack);
             createInfo.sType(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
             createInfo.pApplicationInfo(appInfo);
-            createInfo.ppEnabledExtensionNames(glfwExtensions);
+            createInfo.ppEnabledExtensionNames(requiredExtensions);
+
+            // [CHANGED: Inject the Khronos Validation Layer]
+            if (ENABLE_VALIDATION_LAYERS) {
+                createInfo.ppEnabledLayerNames(stack.pointers(stack.UTF8("VK_LAYER_KHRONOS_validation")));
+            }
 
             PointerBuffer instancePtr = stack.mallocPointer(1);
             if (vkCreateInstance(createInfo, null, instancePtr) != VK_SUCCESS) {
@@ -218,11 +267,16 @@ public final class Display {
             bindlessFeatures.shaderSampledImageArrayNonUniformIndexing(true);
             // =========================================================================
 
+            VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures = VkPhysicalDeviceDescriptorIndexingFeatures.calloc(stack);
+            indexingFeatures.sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES);
+            indexingFeatures.descriptorBindingPartiallyBound(true); // This tells Vulkan to ignore empty slots!
+
             VkDeviceCreateInfo createInfo = VkDeviceCreateInfo.calloc(stack);
             createInfo.sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
 
             // === INJECT BINDLESS FEATURES INTO THE C-MEMORY CHAIN ===
             createInfo.pNext(bindlessFeatures.address());
+            createInfo.pNext(indexingFeatures.address());
 
             createInfo.pQueueCreateInfos(queueCreateInfos);
             createInfo.pEnabledFeatures(deviceFeatures);
@@ -273,6 +327,11 @@ public final class Display {
         if (vkDevice != null) {
             vkDestroyDevice(vkDevice, null);
         }
+
+        if (ENABLE_VALIDATION_LAYERS && debugMessenger != VK_NULL_HANDLE) {
+            vkDestroyDebugUtilsMessengerEXT(vkInstance, debugMessenger, null);
+        }
+
         if (vkInstance != null) {
             vkDestroySurfaceKHR(vkInstance, surface, null);
             vkDestroyInstance(vkInstance, null);
