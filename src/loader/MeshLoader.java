@@ -1,6 +1,5 @@
 package loader;
 
-import model.Model;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.FloatBuffer;
@@ -12,7 +11,8 @@ import static org.lwjgl.opengl.GL46.*;
  * High-performance ModelLoader.
  * Replaces object-based tracking with primitive arrays to avoid auto-boxing.
  */
-public final class ModelLoader {
+public final class MeshLoader
+{
 
     // Custom primitive arrays to avoid LinkList<Integer> boxing memory leaks
     private static int[] vaos = new int[128];
@@ -64,16 +64,6 @@ public final class ModelLoader {
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, buffer, GL_STATIC_DRAW);
 
         MemoryUtil.memFree(buffer);
-    }
-
-    public static Model loadToVao(float[] positions, float[] textureCoords, float[] normals, int[] indices) {
-        int vaoId = createVao();
-        bindIndicesBuffer(indices);
-        storeDataInAttributeList(0, 3, positions);
-        storeDataInAttributeList(1, 2, textureCoords);
-        storeDataInAttributeList(2, 3, normals);
-        glBindVertexArray(0);
-        return new Model(vaoId, indices.length);
     }
 
     public static void addTexture(int textureId) {

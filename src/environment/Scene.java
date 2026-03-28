@@ -1,9 +1,15 @@
 package environment;
 
-public class Scene
+public abstract class Scene
 {
+    public Scene() {}
 
-    public Scene()
+    public void addEntity()
+    {
+
+    }
+
+    public void removeEntity()
     {
 
     }

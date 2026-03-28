@@ -512,4 +512,8 @@ public class MasterRenderer {
             MemoryUtil.memFree(pSwapchains);
         }
     }
+
+    public static long getCommandPool() {
+        return commandPool;
+    }
 }

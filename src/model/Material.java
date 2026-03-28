@@ -9,5 +9,6 @@ public class Material {
     // Primitive math values for the shader
     public float shineDamper = 1.0f;
     public float reflectivity = 0.0f;
-    public boolean hasTransparency = false;
+    public float transparency = 1f;
+    public float celShade = 0f;
 }
