@@ -1,5 +1,7 @@
 package model;
 
+import loader.MeshLoader;
+
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
@@ -25,6 +27,74 @@ public class Mesh {
     public float[] tangents;
     public int[] indices;
 
+    // The Global ID assigned by the MeshLoader
+    public int vaoId;
+
+    // --- PRIMITIVE Singletons ---
+    public static Mesh SQUARE;
+    public static Mesh CUBE;
+
+    // [CHANGED: 1] The static block ONLY defines the raw math data now.
+    // It does NOT touch Vulkan or the MeshLoader.
+    static {
+        SQUARE = new Mesh("Square");
+        SQUARE.positions = new float[] {
+                -0.5f,  0.5f, 0f, // Top Left
+                -0.5f, -0.5f, 0f, // Bottom Left
+                0.5f, -0.5f, 0f, // Bottom Right
+                0.5f,  0.5f, 0f  // Top Right
+        };
+        SQUARE.textures = new float[] { 0,0,  0,1,  1,1,  1,0 };
+        SQUARE.indices = new int[] { 0,1,3,  3,1,2 };
+
+        // Add this right below the SQUARE definition inside the static block of Mesh.java
+
+        CUBE = new Mesh("Cube");
+
+        // 24 Vertices (4 per face)
+        CUBE.positions = new float[] {
+                // Front face
+                -0.5f,  0.5f,  0.5f,  -0.5f, -0.5f,  0.5f,   0.5f, -0.5f,  0.5f,   0.5f,  0.5f,  0.5f,
+                // Back face
+                0.5f,  0.5f, -0.5f,   0.5f, -0.5f, -0.5f,  -0.5f, -0.5f, -0.5f,  -0.5f,  0.5f, -0.5f,
+                // Top face
+                -0.5f,  0.5f, -0.5f,  -0.5f,  0.5f,  0.5f,   0.5f,  0.5f,  0.5f,   0.5f,  0.5f, -0.5f,
+                // Bottom face
+                -0.5f, -0.5f,  0.5f,  -0.5f, -0.5f, -0.5f,   0.5f, -0.5f, -0.5f,   0.5f, -0.5f,  0.5f,
+                // Right face
+                0.5f,  0.5f,  0.5f,   0.5f, -0.5f,  0.5f,   0.5f, -0.5f, -0.5f,   0.5f,  0.5f, -0.5f,
+                // Left face
+                -0.5f,  0.5f, -0.5f,  -0.5f, -0.5f, -0.5f,  -0.5f, -0.5f,  0.5f,  -0.5f,  0.5f,  0.5f
+        };
+
+        // Standard 0.0 to 1.0 UV mapping for every face
+        CUBE.textures = new float[] {
+                // Front
+                0,0,  0,1,  1,1,  1,0,
+                // Back
+                0,0,  0,1,  1,1,  1,0,
+                // Top
+                0,0,  0,1,  1,1,  1,0,
+                // Bottom
+                0,0,  0,1,  1,1,  1,0,
+                // Right
+                0,0,  0,1,  1,1,  1,0,
+                // Left
+                0,0,  0,1,  1,1,  1,0
+        };
+
+        // 36 Indices (6 faces * 2 triangles * 3 vertices)
+        CUBE.indices = new int[] {
+                0, 1, 3,  3, 1, 2, // Front
+                4, 5, 7,  7, 5, 6, // Back
+                8, 9,11, 11, 9,10, // Top
+                12,13,15, 15,13,14, // Bottom
+                16,17,19, 19,17,18, // Right
+                20,21,23, 23,21,22  // Left
+        };
+
+    }
+
     public Mesh(String name) {
         this.name = name;
     }
@@ -48,6 +118,14 @@ public class Mesh {
         } catch (IOException e) {
             throw new RuntimeException("Failed to export binary mesh: " + name, e);
         }
+    }
+
+    // [CHANGED: 2] We created an explicit method that takes the commandPool.
+    // We will call this manually from the MasterRenderer once Vulkan is alive.
+    public static void initPrimitives(long commandPool) {
+        System.out.println("Uploading primitive meshes to GPU...");
+        MeshLoader.loadMesh(SQUARE, commandPool);
+        MeshLoader.loadMesh(CUBE, commandPool);
     }
 
     public static Mesh importObject(String fileName) {

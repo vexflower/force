@@ -9,9 +9,42 @@ import util.VulkanUtils;
 
 import java.nio.ByteBuffer;
 
+import static org.lwjgl.stb.STBImage.stbi_failure_reason;
+import static org.lwjgl.stb.STBImage.stbi_image_free;
+import static org.lwjgl.stb.STBImage.stbi_load_from_memory;
+import static org.lwjgl.stb.STBImage.stbi_set_flip_vertically_on_load;
 import static org.lwjgl.vulkan.VK12.*;
+import static resources.Resources.streamToOffHeap;
 
 public class TextureLoader {
+
+    // [CHANGED: 1] We must pass the commandPool so TextureLoader can create the Staging Buffer
+    public static int loadTexture(String path, long commandPool) {
+        System.out.println("Streaming Texture to Off-Heap: " + path);
+
+        ByteBuffer rawFileBuffer = streamToOffHeap(path);
+
+        int[] width = new int[1];
+        int[] height = new int[1];
+        int[] channels = new int[1];
+
+        stbi_set_flip_vertically_on_load(true);
+        ByteBuffer decodedImage = stbi_load_from_memory(rawFileBuffer, width, height, channels, 4);
+
+        if (decodedImage == null) {
+            MemoryUtil.memFree(rawFileBuffer);
+            throw new RuntimeException("STB failed to decode image: " + stbi_failure_reason());
+        }
+        MemoryUtil.memFree(rawFileBuffer);
+
+        // [CHANGED: 2] We actually upload it to Vulkan now using your TextureLoader!
+        // This returns the Bindless Array ID (e.g., 0, 1, 2...)
+        int textureId = TextureLoader.uploadToGPU(decodedImage, width[0], height[0], commandPool);
+
+        stbi_image_free(decodedImage);
+
+        return textureId;
+    }
 
     /**
      * Uploads raw decoded pixel data to the GPU using a Staging Buffer.

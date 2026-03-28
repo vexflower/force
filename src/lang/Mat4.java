@@ -1,5 +1,7 @@
 package lang;
 
+import util.FloatList;
+
 import java.nio.FloatBuffer;
 
 /**
@@ -219,6 +221,17 @@ public class Mat4 {
         buf.put(m10); buf.put(m11); buf.put(m12); buf.put(m13);
         buf.put(m20); buf.put(m21); buf.put(m22); buf.put(m23);
         buf.put(m30); buf.put(m31); buf.put(m32); buf.put(m33);
+        return this;
+    }
+
+    // ========================================================================
+    // [CHANGED: ZERO-ALLOCATION SCENE DUMPING]
+    // ========================================================================
+    public Mat4 storeIntoFloatList(FloatList list, int offset) {
+        list.set(offset, m00); list.set(offset + 1, m01); list.set(offset + 2, m02); list.set(offset + 3, m03);
+        list.set(offset + 4, m10); list.set(offset + 5, m11); list.set(offset + 6, m12); list.set(offset + 7, m13);
+        list.set(offset + 8, m20); list.set(offset + 9, m21); list.set(offset + 10, m22); list.set(offset + 11, m23);
+        list.set(offset + 12, m30); list.set(offset + 13, m31); list.set(offset + 14, m32); list.set(offset + 15, m33);
         return this;
     }
 

@@ -2,6 +2,7 @@ package renderer;
 
 import hardware.Display;
 import lang.Mat4;
+import model.Mesh;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
@@ -64,6 +65,9 @@ public class MasterRenderer {
 
         createFramebuffers();
         createCommandPool();
+
+        Mesh.initPrimitives(commandPool);
+
         createCommandBuffer();
         createSyncObjects();
 

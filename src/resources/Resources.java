@@ -23,34 +23,39 @@ public class Resources {
      * @param path The path inside the resources folder (e.g., "textures/grass.png")
      * @return A direct ByteBuffer containing the raw file bytes. MUST BE FREED manually.
      */
-    private static ByteBuffer streamToOffHeap(String path) {
-        try (InputStream is = Resources.class.getClassLoader().getResourceAsStream(path)) {
+    public static ByteBuffer streamToOffHeap(String path) {
+        InputStream is = Resources.class.getResourceAsStream(path);
+
+        try {
+            // IDE Fallback: If IntelliJ is acting up and didn't copy it to the out folder
             if (is == null) {
-                throw new RuntimeException("File not found in Fat-Jar: " + path);
+                java.io.File localFile = new java.io.File("src/resources/" + path);
+                if (localFile.exists()) {
+                    is = new java.io.FileInputStream(localFile);
+                } else {
+                    throw new RuntimeException("File not found in Classpath OR Local System: src/resources/" + path);
+                }
             }
 
-            // Start with a 32KB native buffer
-            int bufferSize = 32768;
-            ByteBuffer nativeBuffer = MemoryUtil.memAlloc(bufferSize);
-            int totalBytesRead = 0;
+            try (InputStream stream = is) {
+                int bufferSize = 32768;
+                ByteBuffer nativeBuffer = MemoryUtil.memAlloc(bufferSize);
+                int totalBytesRead = 0;
 
-            int bytesRead;
-            while ((bytesRead = is.read(TRANSFER_BUFFER)) != -1) {
-                // If the native buffer is full, reallocate it to double the size
-                if (totalBytesRead + bytesRead > nativeBuffer.capacity()) {
-                    bufferSize *= 2;
-                    nativeBuffer = MemoryUtil.memRealloc(nativeBuffer, bufferSize);
+                int bytesRead;
+                while ((bytesRead = stream.read(TRANSFER_BUFFER)) != -1) {
+                    if (totalBytesRead + bytesRead > nativeBuffer.capacity()) {
+                        bufferSize *= 2;
+                        nativeBuffer = MemoryUtil.memRealloc(nativeBuffer, bufferSize);
+                    }
+                    nativeBuffer.put(totalBytesRead, TRANSFER_BUFFER, 0, bytesRead);
+                    totalBytesRead += bytesRead;
                 }
 
-                // Blast the bytes from the 8KB heap buffer into the native C-memory
-                nativeBuffer.put(totalBytesRead, TRANSFER_BUFFER, 0, bytesRead);
-                totalBytesRead += bytesRead;
+                nativeBuffer.position(0);
+                nativeBuffer.limit(totalBytesRead);
+                return nativeBuffer;
             }
-
-            // Set the final limit so STB knows exactly where the file ends
-            nativeBuffer.position(0);
-            nativeBuffer.limit(totalBytesRead);
-            return nativeBuffer;
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to stream resource to off-heap: " + path, e);
@@ -61,7 +66,8 @@ public class Resources {
      * Loads an image from the Fat-Jar and decodes it via STB completely off-heap.
      * @return The Bindless Texture Array ID (Integer Handle)
      */
-    public static int loadTexture(String path) {
+    // [CHANGED: Added commandPool parameter and wired it to TextureLoader]
+    public static int loadTexture(String path, long commandPool) {
         System.out.println("Streaming Texture to Off-Heap: " + path);
 
         // 1. Stream the raw ZIP/JAR bytes into C-Memory
@@ -84,13 +90,10 @@ public class Resources {
         // 3. Free the raw compressed file bytes immediately. We only need the decoded pixels now.
         MemoryUtil.memFree(rawFileBuffer);
 
-        // TODO: In Step 2, we will upload `decodedImage` to the Vulkan Bindless Array here.
-        // For now, we simulate adding it to the registry.
+        // 4. Send it to the GPU via Staging Buffer!
+        int textureId = loader.TextureLoader.uploadToGPU(decodedImage, width[0], height[0], commandPool);
 
-        int textureId = textureCount++;
-        // BINDLESS_TEXTURE_ARRAY[textureId] = vulkanImageHandle;
-
-        // 4. Free the STB decoded pixels once uploaded to the GPU
+        // 5. Free the STB decoded pixels from RAM now that the GPU has them
         stbi_image_free(decodedImage);
 
         return textureId; // The Entity simply stores this integer!

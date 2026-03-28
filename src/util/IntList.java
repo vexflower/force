@@ -31,6 +31,14 @@ public final class IntList {
         return data[index];
     }
 
+    // Inside util/IntList.java
+
+    // [CHANGED: Added set method so the Scene can update Entity properties]
+    public void set(int index, int value) {
+        if (index >= size || index < 0) throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + size);
+        data[index] = value;
+    }
+
     public int size() {
         return size;
     }

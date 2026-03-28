@@ -1,8 +1,8 @@
 package engine;
 
+import environment.Scene;
 import hardware.Display;
 import hardware.Keyboard;
-import lang.GeomMath;
 import renderer.MasterRenderer;
 import renderer.RenderState;
 import renderer.SharedState;
@@ -11,6 +11,8 @@ public class GameEngine {
 
     private static volatile boolean running = true;
     private static final SharedState sharedState = new SharedState();
+    // [NEW] The active scene!
+    private static Scene currentScene;
 
     public static void main(String... args) {
         System.out.println("Engine initialized from Bootloader.");
@@ -19,6 +21,10 @@ public class GameEngine {
         Display.createDisplay(1280, 720);
         Display.setShowFPSTitle(true);
         MasterRenderer.setRenderer();
+
+        // [CHANGED] Initialize the Scene AFTER the renderer is ready (so we have a command pool)
+        currentScene = new environment.WorldScene();
+        currentScene.init(MasterRenderer.getCommandPool());
 
         // 2. Spawn the Logic/Physics Thread
         Thread logicThread = new Thread(GameEngine::runLogicLoop, "Logic-Thread");
@@ -59,9 +65,8 @@ public class GameEngine {
      * This is your new GAME LOOP. It runs entirely independent of the framerate.
      */
     private static void runLogicLoop() {
-        float currentRotation = 0;
         long lastTime = System.nanoTime();
-        final double nsPerTick = 1000000000.0 / 60.0; // Fixed 60 Ticks Per Second
+        final double nsPerTick = 1000000000.0 / 60.0;
         double delta = 0;
 
         while (running) {
@@ -69,27 +74,16 @@ public class GameEngine {
             delta += (now - lastTime) / nsPerTick;
             lastTime = now;
 
-            // Catch up on missed physics ticks
             while (delta >= 1) {
+                // [CHANGED] We delegate all logic to the Scene!
+                float deltaInSeconds = 1.0f / 60.0f;
+                currentScene.update(deltaInSeconds);
 
-                // 1. Grab the Back Buffer (The one the GPU isn't looking at)
-                RenderState backBuffer = sharedState.getBackBuffer();
-
-                // 2. Perform Game Logic & Physics
-                currentRotation += GeomMath.toRadians(2); // 2 degrees per tick
-
-                // 3. Write data to the Back Buffer
-                backBuffer.spinningTriangleTransform.identity();
-                backBuffer.spinningTriangleTransform.translate(0.0f, 0.0f, 0.5f);
-                backBuffer.spinningTriangleTransform.rotateY(currentRotation);
-
-                // 4. Publish the frame instantly
+                // We still tell the sharedState to swap so the Render Thread grabs the newest data
                 sharedState.swap();
-
                 delta--;
             }
 
-            // Sleep slightly to prevent this thread from burning 100% of a CPU core
             try { Thread.sleep(1); } catch (InterruptedException ignored) {}
         }
     }

@@ -1,100 +1,186 @@
 package loader;
 
+import hardware.Display;
+import model.Mesh;
+import org.lwjgl.PointerBuffer;
+import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
+import org.lwjgl.vulkan.*;
+import util.VulkanUtils;
 
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 
-import static org.lwjgl.opengl.GL46.*;
+// [CHANGED: 1] Removed ALL org.lwjgl.opengl.* imports. Replaced with Vulkan 1.0
+import static org.lwjgl.vulkan.VK10.*;
 
 /**
- * High-performance ModelLoader.
- * Replaces object-based tracking with primitive arrays to avoid auto-boxing.
+ * High-performance Vulkan MeshLoader.
+ * Replaces OpenGL VAOs/VBOs with Vulkan VkBuffers and Staging memory.
  */
-public final class MeshLoader
-{
+public final class MeshLoader {
 
-    // Custom primitive arrays to avoid LinkList<Integer> boxing memory leaks
-    private static int[] vaos = new int[128];
-    private static int vaoCount = 0;
+    // [CHANGED: 2] Vulkan handles are 64-bit pointers, so we MUST use long[] instead of int[].
+    // We separate Vertices and Indices because Vulkan binds them differently.
+    private static long[] vertexBuffers = new long[128];
+    private static long[] vertexMemories = new long[128];
+    private static long[] indexBuffers = new long[128];
+    private static long[] indexMemories = new long[128];
 
-    private static int[] vbos = new int[512];
-    private static int vboCount = 0;
+    // [CHANGED: 3] Vulkan needs to know exactly how many indices to draw during the render loop
+    public static int[] indexCounts = new int[128];
 
-    private static int[] textures = new int[128];
-    private static int textureCount = 0;
+    private static int meshCount = 0;
 
-    private static int createVao() {
-        int vaoId = glGenVertexArrays();
-        if (vaoCount == vaos.length) expandVaos();
-        vaos[vaoCount++] = vaoId;
-        glBindVertexArray(vaoId);
-        return vaoId;
+    /**
+     * [CHANGED: 4] Instead of returning an int right away, we pass the Mesh object in,
+     * upload its data, and assign its vaoId directly.
+     * We require the 'commandPool' to perform the Staging Buffer copies.
+     */
+    public static void loadMesh(Mesh mesh, long commandPool) {
+        if (meshCount == vertexBuffers.length) expandArrays();
+
+        int id = meshCount;
+
+        // 1. Upload Positions (Vertices) to the GPU
+        long[] vData = createBufferFromFloatArray(mesh.positions, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, commandPool);
+        vertexBuffers[id] = vData[0];
+        vertexMemories[id] = vData[1];
+
+        // 2. Upload Indices to the GPU
+        long[] iData = createBufferFromIntArray(mesh.indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, commandPool);
+        indexBuffers[id] = iData[0];
+        indexMemories[id] = iData[1];
+
+        indexCounts[id] = mesh.indices.length;
+
+        // [CHANGED: 5] Assign the registry ID back to the Mesh so we can look it up later!
+        mesh.vaoId = id;
+        meshCount++;
     }
 
-    private static void storeDataInAttributeList(int attributeNumber, int vertexLength, float[] data) {
-        int vboId = glGenBuffers();
-        if (vboCount == vbos.length) expandVbos();
-        vbos[vboCount++] = vboId;
+    /**
+     * [CHANGED: 6] The Vulkan equivalent of OpenGL's glBufferData for Floats.
+     * Returns a long array: [0] = the VkBuffer handle, [1] = the VkDeviceMemory handle
+     */
+    private static long[] createBufferFromFloatArray(float[] data, int usageFlag, long commandPool) {
+        long bufferSize = (long) data.length * 4; // 4 bytes per float
+        VkDevice device = Display.getDevice();
 
-        glBindBuffer(GL_ARRAY_BUFFER, vboId);
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            // STEP A: Create the CPU-Visible Staging Buffer
+            long stagingBuffer = VulkanUtils.createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+            long stagingMemory = VulkanUtils.allocateBufferMemory(stagingBuffer, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-        // Use MemoryUtil to allocate a direct C-buffer (Bypasses Java Heap limit)
-        FloatBuffer buffer = MemoryUtil.memAllocFloat(data.length);
-        buffer.put(data).flip();
+            // STEP B: Map the memory and copy the Java float[] into the C-Memory
+            PointerBuffer pData = stack.mallocPointer(1);
+            vkMapMemory(device, stagingMemory, 0, bufferSize, 0, pData);
+            FloatBuffer floatBuffer = MemoryUtil.memFloatBuffer(pData.get(0), data.length);
+            floatBuffer.put(data);
+            vkUnmapMemory(device, stagingMemory);
 
-        glBufferData(GL_ARRAY_BUFFER, buffer, GL_STATIC_DRAW);
-        glVertexAttribPointer(attributeNumber, vertexLength, GL_FLOAT, false, 0, 0);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
+            // STEP C: Create the ultra-fast GPU-Only Buffer
+            long gpuBuffer = VulkanUtils.createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usageFlag);
+            long gpuMemory = VulkanUtils.allocateBufferMemory(gpuBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-        // Must manually free direct memory!
-        MemoryUtil.memFree(buffer);
+            // STEP D: Instruct the GPU to copy from Staging to Device_Local
+            copyBuffer(stagingBuffer, gpuBuffer, bufferSize, commandPool);
+
+            // STEP E: Destroy the temporary Staging Buffer (Zero memory leaks!)
+            vkDestroyBuffer(device, stagingBuffer, null);
+            vkFreeMemory(device, stagingMemory, null);
+
+            return new long[]{gpuBuffer, gpuMemory};
+        }
     }
 
-    private static void bindIndicesBuffer(int[] indices) {
-        int vboId = glGenBuffers();
-        if (vboCount == vbos.length) expandVbos();
-        vbos[vboCount++] = vboId;
+    /**
+     * [CHANGED: 7] The Vulkan equivalent of glBufferData for Integers (Indices).
+     * Exact same logic as Floats, but we use an IntBuffer for mapping.
+     */
+    private static long[] createBufferFromIntArray(int[] data, int usageFlag, long commandPool) {
+        long bufferSize = (long) data.length * 4; // 4 bytes per int
+        VkDevice device = Display.getDevice();
 
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vboId);
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            long stagingBuffer = VulkanUtils.createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+            long stagingMemory = VulkanUtils.allocateBufferMemory(stagingBuffer, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-        IntBuffer buffer = MemoryUtil.memAllocInt(indices.length);
-        buffer.put(indices).flip();
+            PointerBuffer pData = stack.mallocPointer(1);
+            vkMapMemory(device, stagingMemory, 0, bufferSize, 0, pData);
+            IntBuffer intBuffer = MemoryUtil.memIntBuffer(pData.get(0), data.length);
+            intBuffer.put(data);
+            vkUnmapMemory(device, stagingMemory);
 
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, buffer, GL_STATIC_DRAW);
+            long gpuBuffer = VulkanUtils.createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usageFlag);
+            long gpuMemory = VulkanUtils.allocateBufferMemory(gpuBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-        MemoryUtil.memFree(buffer);
+            copyBuffer(stagingBuffer, gpuBuffer, bufferSize, commandPool);
+
+            vkDestroyBuffer(device, stagingBuffer, null);
+            vkFreeMemory(device, stagingMemory, null);
+
+            return new long[]{gpuBuffer, gpuMemory};
+        }
     }
 
-    public static void addTexture(int textureId) {
-        if (textureCount == textures.length) expandTextures();
-        textures[textureCount++] = textureId;
+    /**
+     * [NEW: 8] Helper method to record and submit a memory copy command to the GPU
+     */
+    private static void copyBuffer(long srcBuffer, long dstBuffer, long size, long commandPool) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkCommandBuffer commandBuffer = VulkanUtils.beginSingleTimeCommands(commandPool);
+
+            VkBufferCopy.Buffer copyRegion = VkBufferCopy.calloc(1, stack);
+            copyRegion.srcOffset(0);
+            copyRegion.dstOffset(0);
+            copyRegion.size(size);
+
+            vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, copyRegion);
+
+            VulkanUtils.endSingleTimeCommands(commandBuffer, commandPool);
+        }
     }
 
+    // [CHANGED: 9] We use glDelete* in OpenGL, but in Vulkan we use vkDestroyBuffer and vkFreeMemory
     public static void destroy() {
-        for (int i = 0; i < vaoCount; i++) glDeleteVertexArrays(vaos[i]);
-        for (int i = 0; i < vboCount; i++) glDeleteBuffers(vbos[i]);
-        for (int i = 0; i < textureCount; i++) glDeleteTextures(textures[i]);
-
-        vaoCount = 0;
-        vboCount = 0;
-        textureCount = 0;
+        VkDevice device = Display.getDevice();
+        for (int i = 0; i < meshCount; i++) {
+            vkDestroyBuffer(device, vertexBuffers[i], null);
+            vkFreeMemory(device, vertexMemories[i], null);
+            vkDestroyBuffer(device, indexBuffers[i], null);
+            vkFreeMemory(device, indexMemories[i], null);
+        }
+        meshCount = 0;
     }
 
-    // --- Array Resizing Utilities ---
-    private static void expandVaos() {
-        int[] newArr = new int[vaos.length * 2];
-        System.arraycopy(vaos, 0, newArr, 0, vaos.length);
-        vaos = newArr;
+    // [CHANGED: 10] Updated to expand the new long arrays
+    private static void expandArrays() {
+        int newSize = vertexBuffers.length * 2;
+
+        long[] newVB = new long[newSize];
+        System.arraycopy(vertexBuffers, 0, newVB, 0, meshCount);
+        vertexBuffers = newVB;
+
+        long[] newVM = new long[newSize];
+        System.arraycopy(vertexMemories, 0, newVM, 0, meshCount);
+        vertexMemories = newVM;
+
+        long[] newIB = new long[newSize];
+        System.arraycopy(indexBuffers, 0, newIB, 0, meshCount);
+        indexBuffers = newIB;
+
+        long[] newIM = new long[newSize];
+        System.arraycopy(indexMemories, 0, newIM, 0, meshCount);
+        indexMemories = newIM;
+
+        int[] newIC = new int[newSize];
+        System.arraycopy(indexCounts, 0, newIC, 0, meshCount);
+        indexCounts = newIC;
     }
-    private static void expandVbos() {
-        int[] newArr = new int[vbos.length * 2];
-        System.arraycopy(vbos, 0, newArr, 0, vbos.length);
-        vbos = newArr;
-    }
-    private static void expandTextures() {
-        int[] newArr = new int[textures.length * 2];
-        System.arraycopy(textures, 0, newArr, 0, textures.length);
-        textures = newArr;
-    }
+
+    // --- GETTERS FOR RENDERER ---
+    public static long getVertexBuffer(int id) { return vertexBuffers[id]; }
+    public static long getIndexBuffer(int id) { return indexBuffers[id]; }
+    public static int getIndexCount(int id) { return indexCounts[id]; }
 }
