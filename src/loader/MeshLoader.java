@@ -148,18 +148,6 @@ public final class MeshLoader {
         }
     }
 
-    // [CHANGED: 9] We use glDelete* in OpenGL, but in Vulkan we use vkDestroyBuffer and vkFreeMemory
-    public static void destroy() {
-        VkDevice device = Display.getDevice();
-        for (int i = 0; i < meshCount; i++) {
-            vkDestroyBuffer(device, vertexBuffers[i], null);
-            vkFreeMemory(device, vertexMemories[i], null);
-            vkDestroyBuffer(device, indexBuffers[i], null);
-            vkFreeMemory(device, indexMemories[i], null);
-        }
-        meshCount = 0;
-    }
-
     // [CHANGED: 10] Updated to expand the new long arrays
     private static void expandArrays() {
         int newSize = vertexBuffers.length * 2;
@@ -183,6 +171,20 @@ public final class MeshLoader {
         int[] newIC = new int[newSize];
         System.arraycopy(indexCounts, 0, newIC, 0, meshCount);
         indexCounts = newIC;
+    }
+
+    public static void destroy() {
+        VkDevice device = hardware.Display.getDevice();
+        for (int i = 0; i < meshCount; i++) {
+            vkDestroyBuffer(device, vertexBuffers[i], null);
+            vkFreeMemory(device, vertexMemories[i], null);
+            vkDestroyBuffer(device, indexBuffers[i], null);
+            vkFreeMemory(device, indexMemories[i], null);
+            // [CHANGED: Added the missing UV buffers!]
+            vkDestroyBuffer(device, uvBuffers[i], null);
+            vkFreeMemory(device, uvMemories[i], null);
+        }
+        meshCount = 0;
     }
 
     // --- GETTERS FOR RENDERER ---

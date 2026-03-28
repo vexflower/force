@@ -122,8 +122,30 @@ public class TextureLoader {
             long imageView = VulkanUtils.createImageView(vkImage, VK_FORMAT_R8G8B8A8_SRGB);
             long sampler = VulkanUtils.createTextureSampler();
 
-            // Store in our new registry!
-            return TextureRegistry.add(vkImage, vkImageMemory, imageView, sampler);
+            // Store in our Java registry to get the ID
+            int textureId = TextureRegistry.add(vkImage, vkImageMemory, imageView, sampler);
+
+            // ==========================================
+            // 5. UPDATE THE BINDLESS DESCRIPTOR SET
+            // ==========================================
+            // This is the missing link! We must explicitly tell the GPU where this texture lives.
+            VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack);
+            imageInfo.imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            imageInfo.imageView(imageView);
+            imageInfo.sampler(sampler);
+
+            VkWriteDescriptorSet.Buffer descriptorWrite = VkWriteDescriptorSet.calloc(1, stack);
+            descriptorWrite.sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+            descriptorWrite.dstSet(shader.VKShader.bindlessDescriptorSet); // The Global Set
+            descriptorWrite.dstBinding(0); // Binding 0 (where our textures[] array lives in the shader)
+            descriptorWrite.dstArrayElement(textureId); // The exact slot in the array! (e.g., 0 for brat.png)
+            descriptorWrite.descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            descriptorWrite.descriptorCount(1);
+            descriptorWrite.pImageInfo(imageInfo);
+
+            vkUpdateDescriptorSets(device, descriptorWrite, null);
+
+            return textureId;
         }
     }
 }

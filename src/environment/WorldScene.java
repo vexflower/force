@@ -1,45 +1,50 @@
 package environment;
 
-import lang.GeomMath;
 import lang.Mat4;
-import model.Mesh;
-import resources.Resources;
 
 public class WorldScene extends Scene {
 
     private int myBratSquareId;
     private float currentRotation = 0f;
-    private Mat4 tempMatrix = new Mat4(); // Prevents GC allocations during rotation
+
+    // The FBO/Camera Logic Matrices
+    private Mat4 projectionMatrix = new Mat4();
+    private Mat4 viewMatrix = new Mat4();
+    private Mat4 modelMatrix = new Mat4();
+    private Mat4 finalMVP = new Mat4();
 
     @Override
     public void init(long commandPool) {
-        // 1. Load the texture to the GPU
-        int bratTextureId = Resources.loadTexture("images/brat.png", commandPool);
-
-        // 2. Spawn the Entity
+        int bratTextureId = resources.Resources.loadTexture("images/brat.png", commandPool);
         myBratSquareId = addEntity();
+        environment.RendererManager.meshIds.set(myBratSquareId, model.Mesh.SQUARE.vaoId);
+        environment.RendererManager.diffuseTextureIds.set(myBratSquareId, bratTextureId);
 
-        // 3. Assign the Mesh and Texture to the flat arrays
-        RendererManager.meshIds.set(myBratSquareId, Mesh.SQUARE.vaoId);
-        RendererManager.diffuseTextureIds.set(myBratSquareId, bratTextureId);
+        // [CHANGED: Set up the Camera Lens]
+        // 70 degree FOV, 16:9 Aspect Ratio
+        projectionMatrix.perspective(70f, 1280f / 720f, 0.1f, 1000f);
+
+        // Pull the camera BACK 2 units so we can see the square
+        viewMatrix.identity();
+        viewMatrix.translate(0, 0, -2.0f);
     }
 
     @Override
     public void update(float delta) {
-        // Rotate the square a bit every frame
-        currentRotation += GeomMath.toRadians(90f * delta); // 90 degrees per second
+        currentRotation += lang.GeomMath.toRadians(90f * delta);
 
-        // Calculate the new Matrix
-        tempMatrix.identity();
-        tempMatrix.translate(0.0f, 0.0f, 0.5f); // Push it into the screen a bit
-        tempMatrix.rotateY(currentRotation);    // Spin it!
+        // 1. Build the Entity's Local Transform
+        modelMatrix.identity();
+        modelMatrix.rotateY(currentRotation);
 
-        // Write the 16 floats into the massive RendererManager array
+        // 2. Calculate Final MVP (Order matters! Projection * View * Model)
+        finalMVP.identity();
+        finalMVP.mul(projectionMatrix);
+        finalMVP.mul(viewMatrix);
+        finalMVP.mul(modelMatrix);
+
+        // 3. Dump the perfectly calculated MVP into the renderer
         int offset = myBratSquareId * 16;
-        RendererManager.transforms.set(offset, tempMatrix.m00);
-        RendererManager.transforms.set(offset + 1, tempMatrix.m01);
-        // ... (We will write a helper to dump a Mat4 into a FloatList cleanly later)
-        // For now, let's just cheat and add a helper in FloatList, or just write them out.
-        tempMatrix.storeIntoFloatList(RendererManager.transforms, offset);
+        finalMVP.storeIntoFloatList(environment.RendererManager.transforms, offset);
     }
 }

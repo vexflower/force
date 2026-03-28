@@ -51,6 +51,19 @@ public class Mat4 {
     // STATIC ENGINE ROOM (The Absolute Fastest Path)
     // ========================================================================
 
+    // Creates a 3D Camera Lens
+    public Mat4 perspective(float fov, float aspect, float zNear, float zFar) {
+        float tanHalfFov = (float) Math.tan(Math.toRadians(fov) / 2.0);
+        identity();
+        m00 = 1.0f / (aspect * tanHalfFov);
+        m11 = 1.0f / tanHalfFov;
+        m22 = -(zFar + zNear) / (zFar - zNear);
+        m23 = -1.0f;
+        m32 = -(2.0f * zFar * zNear) / (zFar - zNear);
+        m33 = 0.0f;
+        return this;
+    }
+
     public static void mul(Mat4 left, Mat4 right, Mat4 dest) {
         float l00 = left.m00, l01 = left.m01, l02 = left.m02, l03 = left.m03;
         float l10 = left.m10, l11 = left.m11, l12 = left.m12, l13 = left.m13;
@@ -87,14 +100,39 @@ public class Mat4 {
     // INSTANCE WRAPPERS
     // ========================================================================
 
-    public Mat4 mul(Mat4 right) {
-        mul(this, right, this);
-        return this;
-    }
 
     public Mat4 mul(Mat4 right, Mat4 dest) {
         mul(this, right, dest);
         return dest;
+    }
+
+    // Zero-Allocation Matrix Multiplication
+    public Mat4 mul(Mat4 r) {
+        float nm00 = this.m00 * r.m00 + this.m01 * r.m10 + this.m02 * r.m20 + this.m03 * r.m30;
+        float nm01 = this.m00 * r.m01 + this.m01 * r.m11 + this.m02 * r.m21 + this.m03 * r.m31;
+        float nm02 = this.m00 * r.m02 + this.m01 * r.m12 + this.m02 * r.m22 + this.m03 * r.m32;
+        float nm03 = this.m00 * r.m03 + this.m01 * r.m13 + this.m02 * r.m23 + this.m03 * r.m33;
+
+        float nm10 = this.m10 * r.m00 + this.m11 * r.m10 + this.m12 * r.m20 + this.m13 * r.m30;
+        float nm11 = this.m10 * r.m01 + this.m11 * r.m11 + this.m12 * r.m21 + this.m13 * r.m31;
+        float nm12 = this.m10 * r.m02 + this.m11 * r.m12 + this.m12 * r.m22 + this.m13 * r.m32;
+        float nm13 = this.m10 * r.m03 + this.m11 * r.m13 + this.m12 * r.m23 + this.m13 * r.m33;
+
+        float nm20 = this.m20 * r.m00 + this.m21 * r.m10 + this.m22 * r.m20 + this.m23 * r.m30;
+        float nm21 = this.m20 * r.m01 + this.m21 * r.m11 + this.m22 * r.m21 + this.m23 * r.m31;
+        float nm22 = this.m20 * r.m02 + this.m21 * r.m12 + this.m22 * r.m22 + this.m23 * r.m32;
+        float nm23 = this.m20 * r.m03 + this.m21 * r.m13 + this.m22 * r.m23 + this.m23 * r.m33;
+
+        float nm30 = this.m30 * r.m00 + this.m31 * r.m10 + this.m32 * r.m20 + this.m33 * r.m30;
+        float nm31 = this.m30 * r.m01 + this.m31 * r.m11 + this.m32 * r.m21 + this.m33 * r.m31;
+        float nm32 = this.m30 * r.m02 + this.m31 * r.m12 + this.m32 * r.m22 + this.m33 * r.m32;
+        float nm33 = this.m30 * r.m03 + this.m31 * r.m13 + this.m32 * r.m23 + this.m33 * r.m33;
+
+        this.m00 = nm00; this.m01 = nm01; this.m02 = nm02; this.m03 = nm03;
+        this.m10 = nm10; this.m11 = nm11; this.m12 = nm12; this.m13 = nm13;
+        this.m20 = nm20; this.m21 = nm21; this.m22 = nm22; this.m23 = nm23;
+        this.m30 = nm30; this.m31 = nm31; this.m32 = nm32; this.m33 = nm33;
+        return this;
     }
 
     public Mat4 translate(float x, float y, float z) {

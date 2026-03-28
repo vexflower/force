@@ -34,9 +34,8 @@ public class MasterRenderer {
 
     // --- SYNCHRONIZATION ---
     private static long[] imageAvailableSemaphores;
-    private static long[] renderFinishedSemaphores;
+    private static long[] renderFinishedSemaphores; // Now tied to physical swapchain images
     private static long[] inFlightFences;
-    // [CHANGED: Tracks which image is tied to which frame's fence]
     private static long[] imagesInFlight;
 
     // Zero-GC Cache
@@ -59,10 +58,8 @@ public class MasterRenderer {
         createImageViews();
         createRenderPass();
 
-        // === CRITICAL BINDLESS INJECTION ===
         shader.VKShader.initBindlessHardware(Display.getDevice());
 
-        // Compile Shaders and link them to our Render Pass
         shader.VKShader.EntityShaderPipeline.pipeline = new shader.VKShader.EntityShaderPipeline(Display.getDevice(), renderPass, swapchainExtent);
 
         createFramebuffers();
@@ -135,15 +132,12 @@ public class MasterRenderer {
                 swapchainExtent.height(height.get(0));
             }
 
-            // ==========================================================
-            // [CHANGED: TRIPLE BUFFERING (MAILBOX) LOGIC]
-            // ==========================================================
             IntBuffer pPresentModeCount = stack.mallocInt(1);
             vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, pPresentModeCount, null);
             IntBuffer pPresentModes = stack.mallocInt(pPresentModeCount.get(0));
             vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, pPresentModeCount, pPresentModes);
 
-            int presentMode = VK_PRESENT_MODE_FIFO_KHR; // Standard V-Sync Double Buffering (Fallback)
+            int presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
             for (int i = 0; i < pPresentModeCount.get(0); i++) {
                 if (pPresentModes.get(i) == VK_PRESENT_MODE_MAILBOX_KHR) {
                     presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
@@ -152,7 +146,6 @@ public class MasterRenderer {
                 }
             }
 
-            // Force 3 images if the hardware allows it
             int imageCount = capabilities.minImageCount() + 1;
             if (capabilities.maxImageCount() > 0 && imageCount > capabilities.maxImageCount()) {
                 imageCount = capabilities.maxImageCount();
@@ -172,7 +165,7 @@ public class MasterRenderer {
             createInfo.imageArrayLayers(1);
             createInfo.imageUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
 
-            createInfo.presentMode(presentMode); // [CHANGED: Injected our Mailbox mode]
+            createInfo.presentMode(presentMode);
             createInfo.preTransform(capabilities.currentTransform());
             createInfo.compositeAlpha(VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR);
             createInfo.clipped(true);
@@ -336,13 +329,12 @@ public class MasterRenderer {
 
     private static void createSyncObjects() {
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            // [CHANGED: Reverted Semaphores back to MAX_FRAMES_IN_FLIGHT]
             imageAvailableSemaphores = new long[MAX_FRAMES_IN_FLIGHT];
-            renderFinishedSemaphores = new long[MAX_FRAMES_IN_FLIGHT];
             inFlightFences = new long[MAX_FRAMES_IN_FLIGHT];
 
-            // [CHANGED: Created the Khronos-Standard Image Tracker]
+            // Explicitly sizing the tracking arrays to the swapchain length
             imagesInFlight = new long[swapchainImages.length];
+            renderFinishedSemaphores = new long[swapchainImages.length];
 
             VkSemaphoreCreateInfo semaphoreInfo = VkSemaphoreCreateInfo.calloc(stack);
             semaphoreInfo.sType(VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO);
@@ -355,22 +347,22 @@ public class MasterRenderer {
             LongBuffer pFence = stack.mallocLong(1);
 
             for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-                if (vkCreateSemaphore(Display.getDevice(), semaphoreInfo, null, pSemaphore) != VK_SUCCESS ||
-                        vkCreateSemaphore(Display.getDevice(), semaphoreInfo, null, pSemaphore) != VK_SUCCESS) {
+                if (vkCreateSemaphore(Display.getDevice(), semaphoreInfo, null, pSemaphore) != VK_SUCCESS) {
                     throw new RuntimeException("Failed to create semaphore!");
                 }
-
-                // We recreate the semaphore to get a fresh handle for the second array
-                vkCreateSemaphore(Display.getDevice(), semaphoreInfo, null, pSemaphore);
                 imageAvailableSemaphores[i] = pSemaphore.get(0);
-
-                vkCreateSemaphore(Display.getDevice(), semaphoreInfo, null, pSemaphore);
-                renderFinishedSemaphores[i] = pSemaphore.get(0);
 
                 if (vkCreateFence(Display.getDevice(), fenceInfo, null, pFence) != VK_SUCCESS) {
                     throw new RuntimeException("Failed to create fence!");
                 }
                 inFlightFences[i] = pFence.get(0);
+            }
+
+            for (int i = 0; i < swapchainImages.length; i++) {
+                if (vkCreateSemaphore(Display.getDevice(), semaphoreInfo, null, pSemaphore) != VK_SUCCESS) {
+                    throw new RuntimeException("Failed to create render finished semaphore!");
+                }
+                renderFinishedSemaphores[i] = pSemaphore.get(0);
             }
         }
     }
@@ -378,7 +370,6 @@ public class MasterRenderer {
     public static void render(RenderState state) {
         VkDevice device = Display.getDevice();
 
-        // 1. Wait for the CPU frame to finish executing commands on the GPU
         vkWaitForFences(device, inFlightFences[currentFrame], true, -1);
 
         int acquireResult = vkAcquireNextImageKHR(device, swapchain, -1, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, pImageIndex);
@@ -389,19 +380,12 @@ public class MasterRenderer {
 
         int imageIndex = pImageIndex.get(0);
 
-        // ==========================================================
-        // [CHANGED: THE KHRONOS BULLETPROOF SYNC FIX]
-        // ==========================================================
-        // Check if the physical image we just acquired is still tied to a previous frame's fence.
-        // If it is, we MUST wait for that previous frame to finish before we start overwriting it!
         if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
             vkWaitForFences(device, imagesInFlight[imageIndex], true, -1);
         }
 
-        // Mark the image as "In Flight" by assigning it our current frame's fence
         imagesInFlight[imageIndex] = inFlightFences[currentFrame];
 
-        // Now it is finally safe to reset our fence and start recording!
         vkResetFences(device, inFlightFences[currentFrame]);
         vkResetCommandBuffer(commandBuffers[currentFrame], 0);
 
@@ -447,17 +431,17 @@ public class MasterRenderer {
             throw new RuntimeException("Failed to record command buffer!");
         }
 
-        // ==========================================================
-        // [CHANGED: We can safely use currentFrame for both now!]
-        // ==========================================================
         submitInfo.pWaitSemaphores(pWaitSemaphores.put(0, imageAvailableSemaphores[currentFrame]));
         submitInfo.pCommandBuffers(pCommandBuffers.put(0, commandBuffers[currentFrame]));
-        submitInfo.pSignalSemaphores(pSignalSemaphores.put(0, renderFinishedSemaphores[currentFrame]));
 
-        if (vkQueueSubmit(Display.getGraphicsQueue(), submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) {
-            throw new RuntimeException("Failed to submit draw command buffer!");
+        // Explicitly signaling the semaphore tied to THIS specific imageIndex
+        submitInfo.pSignalSemaphores(pSignalSemaphores.put(0, renderFinishedSemaphores[imageIndex]));
+
+        // [CHANGED: Capture the exact Vulkan Error Code!]
+        int submitResult = vkQueueSubmit(Display.getGraphicsQueue(), submitInfo, inFlightFences[currentFrame]);
+        if (submitResult != VK_SUCCESS) {
+            throw new RuntimeException("GPU CRASH! vkQueueSubmit returned Vulkan Error Code: " + submitResult);
         }
-
         presentInfo.pWaitSemaphores(pSignalSemaphores);
         presentInfo.pImageIndices(pImageIndex);
 
@@ -487,8 +471,19 @@ public class MasterRenderer {
             vkDestroyImageView(device, imageView, null);
         }
 
+        // Properly clear out the GPU-bound semaphores
+        if (renderFinishedSemaphores != null) {
+            for (long sem : renderFinishedSemaphores) {
+                if (sem != VK_NULL_HANDLE) {
+                    vkDestroySemaphore(device, sem, null);
+                }
+            }
+            renderFinishedSemaphores = null;
+        }
+
         if (swapchain != VK_NULL_HANDLE) {
             vkDestroySwapchainKHR(device, swapchain, null);
+            swapchain = VK_NULL_HANDLE;
         }
     }
 
@@ -512,8 +507,21 @@ public class MasterRenderer {
         createImageViews();
         createRenderPass();
 
-        // [CHANGED: Refresh the imagesInFlight array to match new swapchain size]
         imagesInFlight = new long[swapchainImages.length];
+
+        // Rebuild the renderFinished array to exactly match the new swapchain allocation
+        renderFinishedSemaphores = new long[swapchainImages.length];
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkSemaphoreCreateInfo semaphoreInfo = VkSemaphoreCreateInfo.calloc(stack);
+            semaphoreInfo.sType(VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO);
+            LongBuffer pSemaphore = stack.mallocLong(1);
+            for (int i = 0; i < swapchainImages.length; i++) {
+                if (vkCreateSemaphore(device, semaphoreInfo, null, pSemaphore) != VK_SUCCESS) {
+                    throw new RuntimeException("Failed to create render finished semaphore!");
+                }
+                renderFinishedSemaphores[i] = pSemaphore.get(0);
+            }
+        }
 
         shader.VKShader.EntityShaderPipeline.pipeline = new shader.VKShader.EntityShaderPipeline(device, renderPass, swapchainExtent);
         createFramebuffers();
@@ -534,8 +542,8 @@ public class MasterRenderer {
                 vkDestroyDescriptorSetLayout(device, shader.VKShader.bindlessDescriptorSetLayout, null);
             }
 
+            // Do not destroy renderFinishedSemaphores here; cleanupSwapchain() handles it.
             for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-                vkDestroySemaphore(device, renderFinishedSemaphores[i], null);
                 vkDestroySemaphore(device, imageAvailableSemaphores[i], null);
                 vkDestroyFence(device, inFlightFences[i], null);
             }

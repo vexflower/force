@@ -51,13 +51,16 @@ public class GameEngine {
         // 4. Graceful Teardown
         running = false;
         try {
-            logicThread.join(); // Wait for physics to safely shut down
+            logicThread.join();
         } catch (InterruptedException e) {
             System.out.println(e.getMessage());
         }
 
-        MasterRenderer.destroy();
-        Display.closeDisplay();
+        // [CHANGED: Call all destructors in order!]
+        renderer.MasterRenderer.destroy();
+        loader.MeshLoader.destroy();
+        loader.TextureRegistry.destroy();
+        hardware.Display.closeDisplay();
     }
 
 
