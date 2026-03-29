@@ -20,11 +20,10 @@ public class WorldScene extends Scene {
         environment.RendererManager.meshIds.set(myBratSquareId, model.Mesh.SQUARE.vaoId);
         environment.RendererManager.diffuseTextureIds.set(myBratSquareId, bratTextureId);
 
-        // [CHANGED: Set up the Camera Lens]
         // 70 degree FOV, 16:9 Aspect Ratio
         projectionMatrix.perspective(70f, 1280f / 720f, 0.1f, 1000f);
 
-        // Pull the camera BACK 2 units so we can see the square
+        // [THE FIX]: Push the world forward into the -Z axis so the camera can see it!
         viewMatrix.identity();
         viewMatrix.translate(0, 0, -2.0f);
     }
@@ -42,7 +41,6 @@ public class WorldScene extends Scene {
         finalMVP.mul(projectionMatrix);
         finalMVP.mul(viewMatrix);
         finalMVP.mul(modelMatrix);
-
         // 3. Dump the perfectly calculated MVP into the renderer
         int offset = myBratSquareId * 16;
         finalMVP.storeIntoFloatList(environment.RendererManager.transforms, offset);

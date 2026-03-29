@@ -55,14 +55,19 @@ public class Mat4 {
     public Mat4 perspective(float fov, float aspect, float zNear, float zFar) {
         float tanHalfFov = (float) Math.tan(Math.toRadians(fov) / 2.0);
         identity();
+
         m00 = 1.0f / (aspect * tanHalfFov);
-        m11 = 1.0f / tanHalfFov;
-        m22 = -(zFar + zNear) / (zFar - zNear);
-        m23 = -1.0f;
-        m32 = -(2.0f * zFar * zNear) / (zFar - zNear);
+        m11 = -(1.0f / tanHalfFov); // Vulkan Y-flip
+        m22 = -zFar / (zFar - zNear); // Vulkan Z-clip mapping
+
+        // [THE FIX]: These are back in their correct slots!
+        m23 = -1.0f;                                  // Col 2, Row 3 -> The W-Divide
+        m32 = -(zFar * zNear) / (zFar - zNear);       // Col 3, Row 2 -> The Z-Translation
+
         m33 = 0.0f;
         return this;
     }
+
 
     public static void mul(Mat4 left, Mat4 right, Mat4 dest) {
         float l00 = left.m00, l01 = left.m01, l02 = left.m02, l03 = left.m03;
@@ -265,11 +270,11 @@ public class Mat4 {
     // ========================================================================
     // [CHANGED: ZERO-ALLOCATION SCENE DUMPING]
     // ========================================================================
-    public Mat4 storeIntoFloatList(FloatList list, int offset) {
-        list.set(offset, m00); list.set(offset + 1, m01); list.set(offset + 2, m02); list.set(offset + 3, m03);
-        list.set(offset + 4, m10); list.set(offset + 5, m11); list.set(offset + 6, m12); list.set(offset + 7, m13);
-        list.set(offset + 8, m20); list.set(offset + 9, m21); list.set(offset + 10, m22); list.set(offset + 11, m23);
-        list.set(offset + 12, m30); list.set(offset + 13, m31); list.set(offset + 14, m32); list.set(offset + 15, m33);
+    public Mat4 storeIntoFloatList(util.FloatList list, int offset) {
+        list.set(offset, m00); list.set(offset + 1, m10); list.set(offset + 2, m20); list.set(offset + 3, m30); // Column 0
+        list.set(offset + 4, m01); list.set(offset + 5, m11); list.set(offset + 6, m21); list.set(offset + 7, m31); // Column 1
+        list.set(offset + 8, m02); list.set(offset + 9, m12); list.set(offset + 10, m22); list.set(offset + 11, m32); // Column 2
+        list.set(offset + 12, m03); list.set(offset + 13, m13); list.set(offset + 14, m23); list.set(offset + 15, m33); // Column 3
         return this;
     }
 
