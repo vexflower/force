@@ -15,21 +15,24 @@ public class Main {
          Display.setShowFPSTitle(true);
          MasterRenderer.setRenderer();
 
-         // 2. Set up the Initial Scene (Now using Scene3D!)
+         // 2. Set up the Initial Scene
          Scene3D initialScene = new Scene3D(1280, 720);
          initialScene.init(MasterRenderer.getCommandPool());
 
-         // 3. Mount the UI Tree
+         // 3. Mount the UI Tree (Swing Paradigm)
+         Panel rootPane = new Panel(1280, 720);
+         rootPane.setBackgroundColor(0, 0, 0, 0); // Invisible stretching root pane
+         rootPane.init();
+         initialScene.setContentPane(rootPane);
+
+         // Child panel locked 50 pixels from the edge of the Root Pane!
          Panel myPanel = new Panel(500, 500);
-
-         // A nice translucent Glass Red
          myPanel.setBackgroundColor(0.8f, 0.1f, 0.1f, 0.7f);
-
          myPanel.init();
          myPanel.setPosition(50, 50);
-         initialScene.add(myPanel);
+         rootPane.add(myPanel); // Add to the Root Pane, not the Scene!
 
-         // 3. Hand control to the GameEngine Loop
+         // 4. Hand control to the GameEngine Loop
          GameEngine.start(initialScene);
     }
 }

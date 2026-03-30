@@ -165,11 +165,12 @@ public final class VKShader {
                 VkPipelineColorBlendStateCreateInfo colorBlending = VkPipelineColorBlendStateCreateInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO).logicOpEnable(false).pAttachments(colorBlendAttachment);
 
                 // 8. Pipeline Layout (Push Constants setup)
-                // [CHANGED: Increase Push Constant size from 64 to 68 bytes, and expose it to the Fragment Shader]
                 VkPushConstantRange.Buffer pushConstants = VkPushConstantRange.calloc(1, stack);
                 pushConstants.stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
                 pushConstants.offset(0);
-                pushConstants.size(68); // 64 for Mat4 + 4 for Int
+
+                // 64 (Mat4) + 4 (texId) + 4 (renderType) + 8 (vec2 screenSize) = 80 bytes
+                pushConstants.size(80);
 
                 VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkPipelineLayoutCreateInfo.calloc(stack);
                 pipelineLayoutInfo.sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO);

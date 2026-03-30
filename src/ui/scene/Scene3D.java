@@ -1,5 +1,6 @@
 package ui.scene;
 
+import hardware.Display;
 import lang.Mat4;
 import lang.GeomMath;
 
@@ -24,8 +25,19 @@ public class Scene3D extends Scene {
         environment.RendererManager.meshIds.set(myBratSquareId, model.Mesh.SQUARE.vaoId);
         environment.RendererManager.diffuseTextureIds.set(myBratSquareId, bratTextureId);
 
-        projectionMatrix.perspective(70f, 1280f / 720f, 0.1f, 1000f);
+        // Initial perspective calculation
+        projectionMatrix.perspective(70f, (float) Display.getWidth() / Display.getHeight(), 0.1f, 1000f);
         viewMatrix.identity().translate(0, 0, -2.0f);
+    }
+
+    // [NEW] Catch the resize event and fix the 3D stretching!
+    @Override
+    protected void onResize(int width, int height) {
+        if (height == 0) height = 1; // Prevent division by zero if window is minimized
+        float aspect = (float) width / (float) height;
+
+        // Rebuild the perspective matrix with the exact new screen proportions
+        projectionMatrix.perspective(70f, aspect, 0.1f, 1000f);
     }
 
     @Override

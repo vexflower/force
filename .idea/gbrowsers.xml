@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="GBrowserService"><![CDATA[{
+  "defaultHomePage": "gemini.google.com",
+  "history": [
+    {
+      "name": "GBrowser - IntelliJ IDEs Plugin | Marketplace",
+      "url": "https://plugins.jetbrains.com/plugin/14458-gbrowser"
+    },
+    {
+      "name": "‎Google Gemini",
+      "url": "https://gemini.google.com/"
+    },
+    {
+      "name": "Google Gemini",
+      "url": "https://gemini.google.com/app"
+    },
+    {
+      "name": "Sign in - Google Accounts",
+      "url": "https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fgemini.google.com%2F&dsh=S-1859043787%3A1774843230781306&ec=GAZAkgU&followup=https%3A%2F%2Fgemini.google.com%2F&passive=1209600&flowName=GlifWebSignIn&flowEntry=ServiceLogin&ifkv=AT1y2_XwuOtjucTAlk-NNValq-4ALolhNEiQPf65DgtCOVpWFREY3VH3YTRCSNx_H13yG8BV92L0_w"
+    },
+    {
+      "name": "Welcome",
+      "url": "https://accounts.google.com/v3/signin/challenge/pwd?TL=AIgtPP3GJ4r3gQ1nJZfrZaFdnHMrOdirc_Ai1AJVIqMdlCQvGpCSdGHm_82tqz6l&checkConnection=youtube%3A733&checkedDomains=youtube&cid=2&continue=https%3A%2F%2Fgemini.google.com%2F&dsh=S-1859043787%3A1774843230781306&ec=GAZAkgU&flowEntry=ServiceLogin&flowName=GlifWebSignIn&followup=https%3A%2F%2Fgemini.google.com%2F&ifkv=AT1y2_XwuOtjucTAlk-NNValq-4ALolhNEiQPf65DgtCOVpWFREY3VH3YTRCSNx_H13yG8BV92L0_w&pstMsg=1"
+    },
+    {
+      "name": "2-Step Verification To help keep your account safe, Google wants to make sure it’s really you trying to sign in",
+      "url": "https://accounts.google.com/v3/signin/challenge/dp?TL=AIgtPP3GJ4r3gQ1nJZfrZaFdnHMrOdirc_Ai1AJVIqMdlCQvGpCSdGHm_82tqz6l&checkConnection=youtube%3A733&checkedDomains=youtube&cid=12&continue=https%3A%2F%2Fgemini.google.com%2F&dsh=S-1859043787%3A1774843230781306&ec=GAZAkgU&flowEntry=ServiceLogin&flowName=GlifWebSignIn&followup=https%3A%2F%2Fgemini.google.com%2F&ifkv=AT1y2_XwuOtjucTAlk-NNValq-4ALolhNEiQPf65DgtCOVpWFREY3VH3YTRCSNx_H13yG8BV92L0_w&pstMsg=1"
+    },
+    {
+      "name": "Google Gemini",
+      "url": "https://gemini.google.com/app/c75cc1f546bb4ffb"
+    },
+    {
+      "name": "Google Gemini",
+      "url": "https://gemini.google.com/app/880e0ef67218067c"
+    },
+    {
+      "name": "",
+      "url": "gemini.google.com"
+    },
+    {
+      "name": "YouTube",
+      "url": "https://www.youtube.com/?feature=youtu.be"
+    },
+    {
+      "name": "YouTube",
+      "url": "https://www.youtube.com/?feature=youtu.be&themeRefresh=1"
+    }
+  ]
+}]]></component>
+</project>

@@ -18,9 +18,11 @@ public abstract class Container extends FrameBufferObject {
     public float scaleX = 1f;
     public float scaleY = 1f;
 
-    // --- ABSOLUTE TRANSFORM (Sent to the GPU) ---
-    // Pre-allocated once at startup. Zero-GC.
+    // --- ABSOLUTE TRANSFORM (Sent to Children) ---
     public final Mat4 absoluteTransform = new Mat4();
+
+    // --- RENDER TRANSFORM (Sent to the GPU) ---
+    public final Mat4 renderTransform = new Mat4(); // [NEW]
 
     // A single thread-safe scratchpad for the Logic Thread to prevent 'new Mat4()' spam
     private static final Mat4 SCRATCH_MATRIX = new Mat4();
@@ -74,33 +76,33 @@ public abstract class Container extends FrameBufferObject {
         boolean needsUpdate = this.isDirty || forceUpdate;
 
         if (needsUpdate) {
-            // [THE SWING FIX]
-            // Mesh.SQUARE's origin is center-based.
-            // We shift it by half its width/height to make the origin Top-Left.
-            float centerX = localX + (width / 2.0f);
-            float centerY = localY + (height / 2.0f);
-
+            // 1. The Hierarchy Matrix (Top-Left origin, no scaling). Sent to children.
             GeomMath.createTransformationMatrix(
-                    centerX, centerY,
-                    0f, 0f, rotation,
-                    (float) width * scaleX, (float) height * scaleY, // Scale 1x1 quad into pixel dimensions
+                    localX, localY, 0f, 0f, rotation,
+                    1f, 1f, // NO WIDTH/HEIGHT SCALING HERE
                     SCRATCH_MATRIX
             );
 
-            // 2. Multiply by the parent to get the absolute screen position
             if (parentTransform != null) {
-                // Zero-allocation multiplication: absolute = parent * local [cite: 446]
                 parentTransform.mul(SCRATCH_MATRIX, this.absoluteTransform);
             } else {
-                // If this is the Root node (the Scene), its local is its absolute [cite: 411]
                 this.absoluteTransform.load(SCRATCH_MATRIX);
             }
+
+            // 2. The Render Matrix (Center-shifted and scaled). Sent to the GPU.
+            GeomMath.createTransformationMatrix(
+                    width / 2.0f, height / 2.0f, 0f, 0f, 0f,
+                    (float) width * scaleX, (float) height * scaleY,
+                    SCRATCH_MATRIX
+            );
+
+            // absoluteTransform * centerScale = Final GPU Matrix
+            this.absoluteTransform.mul(SCRATCH_MATRIX, this.renderTransform);
 
             this.isDirty = false;
         }
 
-        // 3. Propagate down the tree.
-        // If this node updated, we MUST force all children to update their relative positions!
+        // 3. Propagate the clean top-left anchor to the children
         for (int i = 0; i < children.size(); i++) {
             children.get(i).updateTransform(this.absoluteTransform, needsUpdate);
         }

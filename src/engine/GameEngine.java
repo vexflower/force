@@ -70,7 +70,7 @@ public class GameEngine {
             while (delta >= 1) {
                 // [CHANGED] We delegate all logic to the Scene!
                 float deltaInSeconds = 1.0f / 60.0f;
-                currentScene.update(deltaInSeconds);
+                currentScene.engineUpdate(deltaInSeconds);
 
                 // [NEW: Snapshot the state for the GPU!]
                 RenderState backBuffer = sharedState.getBackBuffer();
