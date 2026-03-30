@@ -22,6 +22,8 @@ import static org.lwjgl.vulkan.VK12.*;
 // Add these right below your other imports in Display.java
 import org.lwjgl.vulkan.VkDebugUtilsMessengerCallbackDataEXT;
 import org.lwjgl.vulkan.VkDebugUtilsMessengerCreateInfoEXT;
+import util.IntList;
+
 import static org.lwjgl.vulkan.EXTDebugUtils.*;
 
 public final class Display {
@@ -53,10 +55,14 @@ public final class Display {
     // [NEW: Validation Layer Control]
     public static final boolean ENABLE_VALIDATION_LAYERS = true;
     private static long debugMessenger;
+    IntList displays = new IntList();
 
     private Display() {}
 
-    public static void createDisplay(int w, int h) {
+    public static void createDisplay(int index, int w, int h) {
+        // this should allow multiple displays because why not. (for 2 monitor based games, or more)
+        // index should be the index of the monitor, when created, it should be zero, then 1, then so on.
+
         if (!glfwInit()) throw new RuntimeException("ERROR: GLFW wasn't initialized");
         width = (w == 0) ? 1280 : w;
         height = (h == 0) ? 720 : h;
@@ -314,6 +320,11 @@ public final class Display {
                 frames = 0;
             }
         }
+    }
+
+    public static void closeDisplays()
+    {
+        // should close ALL possible displays here
     }
 
     public static void closeDisplay() {

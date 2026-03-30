@@ -1,6 +1,8 @@
 package engine;
 
-import environment.Scene;
+import loader.MeshLoader;
+import loader.TextureRegistry;
+import ui.scene.Scene;
 import hardware.Display;
 import hardware.Keyboard;
 import renderer.MasterRenderer;
@@ -14,53 +16,41 @@ public class GameEngine {
     // [NEW] The active scene!
     private static Scene currentScene;
 
-    public static void main(String... args) {
-        System.out.println("Engine initialized from Bootloader.");
+    // Replace public static void main(String... args) with this:
+    public static void start(Scene initialScene) {
+        currentScene = initialScene;
 
-        // 1. Ignite the Hardware (Must be on main thread for macOS/Windows UI)
-        Display.createDisplay(1280, 720);
-        Display.setShowFPSTitle(true);
-        MasterRenderer.setRenderer();
-
-        // [CHANGED] Initialize the Scene AFTER the renderer is ready (so we have a command pool)
-        currentScene = new environment.WorldScene();
-        currentScene.init(MasterRenderer.getCommandPool());
-
-        // 2. Spawn the Logic/Physics Thread
+        // 1. Spawn the Logic/Physics Thread
         Thread logicThread = new Thread(GameEngine::runLogicLoop, "Logic-Thread");
         logicThread.start();
 
-        // 3. The Unlocked Render Loop (Runs as fast as your GPU allows)
+        // 2. The Unlocked Render Loop
         while (!Display.shouldDisplayClose() && running) {
-
-            // Listen for hotswap secret key
-            if (Keyboard.isKeyDown(Keyboard.ZERO)) {
+            if (hardware.Keyboard.isKeyDown(hardware.Keyboard.ZERO)) {
                 System.out.println("F5 Pressed: Engine signaling Bootloader for Hotswap...");
                 running = false;
             }
 
-            // Grab the latest physics snapshot instantly. No locks.
+            // Grab the latest snapshot instantly. No locks.
             RenderState currentFrame = sharedState.getFrontBuffer();
-
-            // Pass the extracted data to Vulkan
             MasterRenderer.render(currentFrame);
 
             Display.updateDisplay();
         }
 
-        // 4. Graceful Teardown
+        // 3. Graceful Teardown
         running = false;
-        try {
-            logicThread.join();
-        } catch (InterruptedException e) {
-            System.out.println(e.getMessage());
-        }
+        try { logicThread.join(); } catch (InterruptedException e) { System.out.println(e.getMessage()); }
 
-        // [CHANGED: Call all destructors in order!]
-        renderer.MasterRenderer.destroy();
-        loader.MeshLoader.destroy();
-        loader.TextureRegistry.destroy();
-        hardware.Display.closeDisplay();
+        // [THE FIX]: Force the CPU to wait until the GPU is completely idle
+        org.lwjgl.vulkan.VK10.vkDeviceWaitIdle(hardware.Display.getDevice());
+
+        currentScene.destroy(); // Now it is safe to nuke the FBOs!
+
+        MasterRenderer.destroy();
+        MeshLoader.destroy();
+        TextureRegistry.destroy();
+        Display.closeDisplay();
     }
 
 
@@ -96,6 +86,9 @@ public class GameEngine {
                         backBuffer.transforms[(i * 16) + f] = environment.RendererManager.transforms.get((eId * 16) + f);
                     }
                 }
+
+                // [NEW] Extract the FBO UI data!
+                currentScene.extractUIData(backBuffer);
 
                 // We still tell the sharedState to swap so the Render Thread grabs the newest data
                 sharedState.swap();

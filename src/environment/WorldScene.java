@@ -1,8 +1,10 @@
 package environment;
 
 import lang.Mat4;
+import ui.scene.Scene;
 
-public class WorldScene extends Scene {
+public class WorldScene extends Scene
+{
 
     private int myBratSquareId;
     private float currentRotation = 0f;
@@ -12,6 +14,11 @@ public class WorldScene extends Scene {
     private Mat4 viewMatrix = new Mat4();
     private Mat4 modelMatrix = new Mat4();
     private Mat4 finalMVP = new Mat4();
+
+    public WorldScene(int width, int height)
+    {
+        super(width, height);
+    }
 
     @Override
     public void init(long commandPool) {
@@ -36,11 +43,12 @@ public class WorldScene extends Scene {
         modelMatrix.identity();
         modelMatrix.rotateY(currentRotation);
 
-        // 2. Calculate Final MVP (Order matters! Projection * View * Model)
+        // [FIXED: Row-Major MVP Order]
         finalMVP.identity();
-        finalMVP.mul(projectionMatrix);
-        finalMVP.mul(viewMatrix);
         finalMVP.mul(modelMatrix);
+        finalMVP.mul(viewMatrix);
+        finalMVP.mul(projectionMatrix);
+
         // 3. Dump the perfectly calculated MVP into the renderer
         int offset = myBratSquareId * 16;
         finalMVP.storeIntoFloatList(environment.RendererManager.transforms, offset);

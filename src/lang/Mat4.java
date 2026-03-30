@@ -57,7 +57,7 @@ public class Mat4 {
         identity();
 
         m00 = 1.0f / (aspect * tanHalfFov);
-        m11 = -(1.0f / tanHalfFov); // Vulkan Y-flip
+        m11 = (1.0f / tanHalfFov); // Vulkan Y-flip
         m22 = -zFar / (zFar - zNear); // Vulkan Z-clip mapping
 
         // [THE FIX]: These are back in their correct slots!
@@ -65,6 +65,19 @@ public class Mat4 {
         m32 = -(zFar * zNear) / (zFar - zNear);       // Col 3, Row 2 -> The Z-Translation
 
         m33 = 0.0f;
+        return this;
+    }
+
+    // Transforms pixel coordinates into Vulkan Screen Space
+    public Mat4 ortho(float left, float right, float bottom, float top, float zNear, float zFar) {
+        identity();
+        m00 = 2.0f / (right - left);
+        m11 = 2.0f / (bottom - top);
+        m22 = -2.0f / (zFar - zNear);
+
+        m30 = -(right + left) / (right - left);
+        m31 = -(bottom + top) / (bottom - top);
+        m32 = -(zFar + zNear) / (zFar - zNear);
         return this;
     }
 
@@ -267,14 +280,27 @@ public class Mat4 {
         return this;
     }
 
+    // Zero-allocation dump straight into a primitive float array
+    public void store(float[] dest, int offset) {
+        dest[offset]      = m00; dest[offset + 1]  = m01; dest[offset + 2]  = m02; dest[offset + 3]  = m03;
+        dest[offset + 4]  = m10; dest[offset + 5]  = m11; dest[offset + 6]  = m12; dest[offset + 7]  = m13;
+        dest[offset + 8]  = m20; dest[offset + 9]  = m21; dest[offset + 10] = m22; dest[offset + 11] = m23;
+        dest[offset + 12] = m30; dest[offset + 13] = m31; dest[offset + 14] = m32; dest[offset + 15] = m33;
+    }
+
     // ========================================================================
     // [CHANGED: ZERO-ALLOCATION SCENE DUMPING]
     // ========================================================================
+    // [FIXED: ZERO-ALLOCATION SCENE DUMPING]
     public Mat4 storeIntoFloatList(util.FloatList list, int offset) {
-        list.set(offset, m00); list.set(offset + 1, m10); list.set(offset + 2, m20); list.set(offset + 3, m30); // Column 0
-        list.set(offset + 4, m01); list.set(offset + 5, m11); list.set(offset + 6, m21); list.set(offset + 7, m31); // Column 1
-        list.set(offset + 8, m02); list.set(offset + 9, m12); list.set(offset + 10, m22); list.set(offset + 11, m32); // Column 2
-        list.set(offset + 12, m03); list.set(offset + 13, m13); list.set(offset + 14, m23); list.set(offset + 15, m33); // Column 3
+        // Vulkan Column 0
+        list.set(offset, m00); list.set(offset + 1, m01); list.set(offset + 2, m02); list.set(offset + 3, m03);
+        // Vulkan Column 1
+        list.set(offset + 4, m10); list.set(offset + 5, m11); list.set(offset + 6, m12); list.set(offset + 7, m13);
+        // Vulkan Column 2
+        list.set(offset + 8, m20); list.set(offset + 9, m21); list.set(offset + 10, m22); list.set(offset + 11, m23);
+        // Vulkan Column 3 (Translation & W-Divide)
+        list.set(offset + 12, m30); list.set(offset + 13, m31); list.set(offset + 14, m32); list.set(offset + 15, m33);
         return this;
     }
 

@@ -153,7 +153,15 @@ public final class VKShader {
                 VkPipelineMultisampleStateCreateInfo multisampling = VkPipelineMultisampleStateCreateInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO).sampleShadingEnable(false).rasterizationSamples(VK_SAMPLE_COUNT_1_BIT);
 
                 // 7. Color Blending
-                VkPipelineColorBlendAttachmentState.Buffer colorBlendAttachment = VkPipelineColorBlendAttachmentState.calloc(1, stack).colorWriteMask(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT).blendEnable(false);
+                VkPipelineColorBlendAttachmentState.Buffer colorBlendAttachment = VkPipelineColorBlendAttachmentState.calloc(1, stack)
+                        .colorWriteMask(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT)
+                        .blendEnable(true)
+                        .srcColorBlendFactor(VK_BLEND_FACTOR_SRC_ALPHA)
+                        .dstColorBlendFactor(VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
+                        .colorBlendOp(VK_BLEND_OP_ADD)
+                        .srcAlphaBlendFactor(VK_BLEND_FACTOR_ONE)
+                        .dstAlphaBlendFactor(VK_BLEND_FACTOR_ZERO)
+                        .alphaBlendOp(VK_BLEND_OP_ADD);
                 VkPipelineColorBlendStateCreateInfo colorBlending = VkPipelineColorBlendStateCreateInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO).logicOpEnable(false).pAttachments(colorBlendAttachment);
 
                 // 8. Pipeline Layout (Push Constants setup)
@@ -261,6 +269,30 @@ public final class VKShader {
             return buffer;
         } catch (Exception e) {
             throw new RuntimeException("Failed to stream shader resource: " + resourcePath, e);
+        }
+    }
+
+    /**
+     * Dynamically maps a Vulkan Image to a specific slot in the Global Bindless Array.
+     */
+    public static void updateBindlessTexture(int textureId, long imageView, long sampler) {
+        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+            VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack);
+            // We tell the GPU to expect this image to be in a READ_ONLY state when sampled
+            imageInfo.imageLayout(org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            imageInfo.imageView(imageView);
+            imageInfo.sampler(sampler);
+
+            VkWriteDescriptorSet.Buffer descriptorWrite = VkWriteDescriptorSet.calloc(1, stack);
+            descriptorWrite.sType(org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+            descriptorWrite.dstSet(bindlessDescriptorSet); // The Global Set
+            descriptorWrite.dstBinding(0);
+            descriptorWrite.dstArrayElement(textureId);    // The exact array index!
+            descriptorWrite.descriptorType(org.lwjgl.vulkan.VK10.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            descriptorWrite.descriptorCount(1);
+            descriptorWrite.pImageInfo(imageInfo);
+
+            org.lwjgl.vulkan.VK10.vkUpdateDescriptorSets(hardware.Display.getDevice(), descriptorWrite, null);
         }
     }
 
