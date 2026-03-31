@@ -18,13 +18,18 @@ public class Main {
         // 1. The 3D Scene Container
         Scene3D scene = new Scene3D(1280, 720);
         Display.setContentPane(scene);
-        scene.init(); // Init the camera
+        scene.init();
+
+        // 2. The 3D Camera
+        entity.Camera cam = new entity.Camera();
+        cam.setPosition(0f, 20f, 50f); // Step back to look at the fox
+        scene.setCamera(cam);
 
         // 2. High-Level Entity Creation
-        Mesh fox = MeshLoader.loadObject("obj/fox.obj");
+        Mesh fox = MeshLoader.loadObject("obj/fox.obj", true, false);
         int texture = TextureLoader.loadTexture("images/fox.jpg");
         Entity ent = new Entity(fox, texture);
-        ent.setPosition(0, 0, -200f);
+        ent.setPosition(0, 20f, -200f);
         ent.moveRotate(0f, 90f, 0f, -1f); // 90 degrees per second, infinite
         scene.addEntity(ent);
 

@@ -10,14 +10,12 @@ import org.lwjgl.assimp.AIVector3D;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.*;
-import resources.Resources;
 import util.FloatList;
 import util.IntList;
 import util.VulkanUtils;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.file.Files;
@@ -147,105 +145,6 @@ public final class MeshLoader {
 
             return new long[]{gpuBuffer, gpuMemory};
         }
-    }
-
-    /**
-     * Fat-Jar Ready Object Loader.
-     * Acts exactly like TextureLoader, using streamToOffHeap to guarantee the file is found.
-     */
-    public static model.Mesh loadObject(String path) {
-        System.out.println("Assimp Streaming to Off-Heap: " + path);
-
-        String meshName = path.substring(path.lastIndexOf('/') + 1);
-        if (meshName.contains(".")) {
-            meshName = meshName.substring(0, meshName.lastIndexOf('.'));
-        }
-
-        // 1. Fetch Fat-JAR asset directly into C-Memory
-        java.nio.ByteBuffer fileBuffer = resources.Resources.streamToOffHeap(path);
-        if (fileBuffer == null) {
-            throw new RuntimeException("streamToOffHeap failed to locate: " + path);
-        }
-
-        // 2. Let Assimp parse the memory buffer directly!
-        // These flags tell the native C++ library to fix quads, merge duplicates, and calculate tangents.
-        int flags = aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_CalcTangentSpace | aiProcess_GenSmoothNormals;
-
-        // Use aiImportFileFromMemory because we are reading from the JAR stream, not the OS disk.
-        AIScene scene = aiImportFileFromMemory(fileBuffer, flags, (CharSequence) "");
-
-        if (scene == null || scene.mMeshes() == null) {
-            org.lwjgl.system.MemoryUtil.memFree(fileBuffer);
-            throw new RuntimeException("Assimp failed to parse: " + aiGetErrorString());
-        }
-
-        // 3. Extract the first Mesh from the file
-        AIMesh aiMesh = AIMesh.create(scene.mMeshes().get(0));
-        int vertexCount = aiMesh.mNumVertices();
-
-        model.Mesh mesh = new model.Mesh(meshName);
-        mesh.positions = new float[vertexCount * 3];
-        mesh.textures = new float[vertexCount * 2];
-        mesh.normals = new float[vertexCount * 3];
-
-        // 4. Extract Positions (Fixing Vulkan's inverted Y-axis)
-        AIVector3D.Buffer aiVertices = aiMesh.mVertices();
-        for (int i = 0; i < vertexCount; i++) {
-            AIVector3D v = aiVertices.get(i);
-            mesh.positions[i * 3]     = v.x();
-            // [THE FIX]: Negate the Z to point UP in Vulkan's coordinate space
-            mesh.positions[i * 3 + 1] = -v.z();
-            mesh.positions[i * 3 + 2] = -v.y();
-        }
-
-        // 5. Extract Normals (Must match the position swizzle exactly!)
-        AIVector3D.Buffer aiNormals = aiMesh.mNormals();
-        if (aiNormals != null) {
-            for (int i = 0; i < vertexCount; i++) {
-                AIVector3D n = aiNormals.get(i);
-                mesh.normals[i * 3]     = n.x();
-                // [THE FIX]: Negate the Z for normals too so lighting doesn't break
-                mesh.normals[i * 3 + 1] = -n.z();
-                mesh.normals[i * 3 + 2] = -n.y();
-            }
-        }
-
-        // 6. Extract Textures (Channel 0)
-        AIVector3D.Buffer texCoords = aiMesh.mTextureCoords(0);
-        if (texCoords != null) {
-            for (int i = 0; i < vertexCount; i++) {
-                AIVector3D t = texCoords.get(i);
-                mesh.textures[i * 2]     = t.x();
-                // Assimp typically loads UVs top-left, Vulkan prefers bottom-left
-                mesh.textures[i * 2 + 1] = 1.0f - t.y();
-            }
-        }
-
-        // 7. Extract Triangulated Indices (Fixing the Winding Order Flip!)
-        int faceCount = aiMesh.mNumFaces();
-        AIFace.Buffer faces = aiMesh.mFaces();
-        mesh.indices = new int[faceCount * 3];
-
-        int indexCount = 0;
-        for (int i = 0; i < faceCount; i++) {
-            AIFace face = faces.get(i);
-            if (face.mNumIndices() == 3) {
-                mesh.indices[indexCount++] = face.mIndices().get(0);
-                // [THE FIX]: Swap the 2nd and 3rd index to reverse CCW back to CW
-                mesh.indices[indexCount++] = face.mIndices().get(2);
-                mesh.indices[indexCount++] = face.mIndices().get(1);
-            }
-        }
-
-        // 8. Safely free all native C-memory!
-        aiReleaseImport(scene);
-        org.lwjgl.system.MemoryUtil.memFree(fileBuffer);
-
-        System.out.println("Assimp Success! Vertices: " + vertexCount + ", Indices: " + indexCount);
-
-        // 9. Upload the perfectly formatted arrays straight to Vulkan
-        MeshLoader.loadMesh(mesh);
-        return mesh;
     }
 
     public static Mesh parseObjFromMemory(byte[] data, String meshName) {
@@ -631,6 +530,109 @@ public final class MeshLoader {
         }
         offset[0] = i;
         return negative ? -value : value;
+    }
+
+    /**
+     * Standard Wavefront Loader (Default).
+     * Assumes Y-Up geometry and standard bottom-left UVs that need flipping for Vulkan.
+     */
+    public static model.Mesh loadObject(String path) {
+        // Default: Not Z-Up (false), Flip UVs for Vulkan (true)
+        return loadObject(path, false, true);
+    }
+
+    /**
+     * Advanced Loader for custom formats (like 3ds Max).
+     * @param isZUp True if the model was exported from Z-Up software (3ds Max, Blender default).
+     * @param flipUV True to invert the vertical texture coordinates.
+     */
+    public static model.Mesh loadObject(String path, boolean isZUp, boolean flipUV) {
+        System.out.println("Assimp Streaming: " + path + " | Z-Up: " + isZUp + " | FlipUV: " + flipUV);
+
+        String meshName = path.substring(path.lastIndexOf('/') + 1);
+        if (meshName.contains(".")) meshName = meshName.substring(0, meshName.lastIndexOf('.'));
+
+        // 1. Fetch Fat-JAR asset
+        java.nio.ByteBuffer fileBuffer = resources.Resources.streamToOffHeap(path);
+        if (fileBuffer == null) throw new RuntimeException("streamToOffHeap failed to locate: " + path);
+
+        int flags = aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_CalcTangentSpace | aiProcess_GenSmoothNormals;
+        AIScene scene = aiImportFileFromMemory(fileBuffer, flags, (CharSequence) "");
+
+        if (scene == null || scene.mMeshes() == null) {
+            org.lwjgl.system.MemoryUtil.memFree(fileBuffer);
+            throw new RuntimeException("Assimp failed to parse: " + aiGetErrorString());
+        }
+
+        AIMesh aiMesh = AIMesh.create(scene.mMeshes().get(0));
+        int vertexCount = aiMesh.mNumVertices();
+
+        model.Mesh mesh = new model.Mesh(meshName);
+        mesh.positions = new float[vertexCount * 3];
+        mesh.textures = new float[vertexCount * 2];
+        mesh.normals = new float[vertexCount * 3];
+
+        // 2. Extract Positions (Dynamic Axis Swapping)
+        AIVector3D.Buffer aiVertices = aiMesh.mVertices();
+        for (int i = 0; i < vertexCount; i++) {
+            AIVector3D v = aiVertices.get(i);
+            mesh.positions[i * 3] = v.x();
+            if (isZUp) {
+                mesh.positions[i * 3 + 1] = -v.z(); // 3ds Max Z-Up to Vulkan Y-Down
+                mesh.positions[i * 3 + 2] = -v.y();
+            } else {
+                mesh.positions[i * 3 + 1] = -v.y(); // Standard Y-Up to Vulkan Y-Down
+                mesh.positions[i * 3 + 2] = v.z();
+            }
+        }
+
+        // 3. Extract Normals (Matching the Position Swizzle)
+        AIVector3D.Buffer aiNormals = aiMesh.mNormals();
+        if (aiNormals != null) {
+            for (int i = 0; i < vertexCount; i++) {
+                AIVector3D n = aiNormals.get(i);
+                mesh.normals[i * 3] = n.x();
+                if (isZUp) {
+                    mesh.normals[i * 3 + 1] = -n.z();
+                    mesh.normals[i * 3 + 2] = -n.y();
+                } else {
+                    mesh.normals[i * 3 + 1] = -n.y();
+                    mesh.normals[i * 3 + 2] = n.z();
+                }
+            }
+        }
+
+        // 4. Extract Textures (Dynamic UV Flipping)
+        AIVector3D.Buffer texCoords = aiMesh.mTextureCoords(0);
+        if (texCoords != null) {
+            for (int i = 0; i < vertexCount; i++) {
+                AIVector3D t = texCoords.get(i);
+                mesh.textures[i * 2] = t.x();
+                // [THE FIX]: If 3ds Max already baked the UVs top-left, we can toggle the flip off!
+                mesh.textures[i * 2 + 1] = flipUV ? (1.0f - t.y()) : t.y();
+            }
+        }
+
+        // 5. Extract Indices (Winding order is flipped because we negated the Vulkan Y-Axis)
+        int faceCount = aiMesh.mNumFaces();
+        AIFace.Buffer faces = aiMesh.mFaces();
+        mesh.indices = new int[faceCount * 3];
+
+        int indexCount = 0;
+        for (int i = 0; i < faceCount; i++) {
+            AIFace face = faces.get(i);
+            if (face.mNumIndices() == 3) {
+                mesh.indices[indexCount++] = face.mIndices().get(0);
+                mesh.indices[indexCount++] = face.mIndices().get(2);
+                mesh.indices[indexCount++] = face.mIndices().get(1);
+            }
+        }
+
+        aiReleaseImport(scene);
+        org.lwjgl.system.MemoryUtil.memFree(fileBuffer);
+
+        MeshLoader.loadMesh(mesh);
+        return mesh;
     }
 
     // --- GETTERS FOR RENDERER ---
