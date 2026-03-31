@@ -4,6 +4,7 @@ import hardware.Display;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.*;
+import renderer.MasterRenderer;
 
 import java.nio.LongBuffer;
 
@@ -160,12 +161,12 @@ public class VulkanUtils {
     // --- COMMAND BUFFER HELPERS ---
     // Note: You must expose a 'CommandPool' variable from your MasterRenderer.java for these to work.
 
-    public static VkCommandBuffer beginSingleTimeCommands(long commandPool) {
+    public static VkCommandBuffer beginSingleTimeCommands() {
         try (MemoryStack stack = stackPush()) {
             VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc(stack);
             allocInfo.sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO);
             allocInfo.level(VK_COMMAND_BUFFER_LEVEL_PRIMARY);
-            allocInfo.commandPool(commandPool);
+            allocInfo.commandPool(MasterRenderer.getCommandPool());
             allocInfo.commandBufferCount(1);
 
             PointerBuffer pCommandBuffer = stack.mallocPointer(1);
@@ -182,7 +183,7 @@ public class VulkanUtils {
         }
     }
 
-    public static void endSingleTimeCommands(VkCommandBuffer commandBuffer, long commandPool) {
+    public static void endSingleTimeCommands(VkCommandBuffer commandBuffer) {
         try (MemoryStack stack = stackPush()) {
             vkEndCommandBuffer(commandBuffer);
 
@@ -193,7 +194,7 @@ public class VulkanUtils {
             vkQueueSubmit(Display.getGraphicsQueue(), submitInfo, VK_NULL_HANDLE);
             vkQueueWaitIdle(Display.getGraphicsQueue());
 
-            vkFreeCommandBuffers(Display.getDevice(), commandPool, commandBuffer);
+            vkFreeCommandBuffers(Display.getDevice(), MasterRenderer.getCommandPool(), commandBuffer);
         }
     }
 

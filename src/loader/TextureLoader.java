@@ -19,7 +19,7 @@ import static resources.Resources.streamToOffHeap;
 public class TextureLoader {
 
     // [CHANGED: 1] We must pass the commandPool so TextureLoader can create the Staging Buffer
-    public static int loadTexture(String path, long commandPool) {
+    public static int loadTexture(String path) {
         System.out.println("Streaming Texture to Off-Heap: " + path);
 
         ByteBuffer rawFileBuffer = streamToOffHeap(path);
@@ -39,18 +39,14 @@ public class TextureLoader {
 
         // [CHANGED: 2] We actually upload it to Vulkan now using your TextureLoader!
         // This returns the Bindless Array ID (e.g., 0, 1, 2...)
-        int textureId = TextureLoader.uploadToGPU(decodedImage, width[0], height[0], commandPool);
+        int textureId = TextureLoader.uploadToGPU(decodedImage, width[0], height[0]);
 
         stbi_image_free(decodedImage);
 
         return textureId;
     }
 
-    /**
-     * Uploads raw decoded pixel data to the GPU using a Staging Buffer.
-     * @param commandPool Required to allocate a temporary command buffer for the memory transfer.
-     */
-    public static int uploadToGPU(ByteBuffer decodedPixels, int width, int height, long commandPool) {
+    public static int uploadToGPU(ByteBuffer decodedPixels, int width, int height) {
         long imageSize = (long) width * height * 4; // 4 bytes per pixel (RGBA)
         VkDevice device = Display.getDevice(); // Get device directly from your Display class
 
@@ -93,7 +89,7 @@ public class TextureLoader {
             // 3. TRANSITIONS AND COPYING
             // ==========================================
             // Pass the command pool down so VulkanUtils can allocate the commands
-            VkCommandBuffer commandBuffer = VulkanUtils.beginSingleTimeCommands(commandPool);
+            VkCommandBuffer commandBuffer = VulkanUtils.beginSingleTimeCommands();
 
             VulkanUtils.transitionImageLayout(
                     commandBuffer, vkImage,
@@ -111,7 +107,7 @@ public class TextureLoader {
                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
             );
 
-            VulkanUtils.endSingleTimeCommands(commandBuffer, commandPool);
+            VulkanUtils.endSingleTimeCommands(commandBuffer);
 
             // ==========================================
             // 4. CLEANUP RAM & CREATE VIEWS

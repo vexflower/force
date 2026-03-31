@@ -2,6 +2,7 @@ package engine;
 
 import entity.Entity;
 import hardware.Display;
+import loader.MeshLoader;
 import loader.TextureLoader;
 import model.Mesh;
 import renderer.MasterRenderer;
@@ -12,7 +13,7 @@ public class Main {
     public static void main(String[] args) {
         Display.createDisplay(0, 1280, 720);
         Display.setShowFPSTitle(true);
-        MasterRenderer.setRenderer();
+        MasterRenderer.setRenderer(); // MANDATORY TO SET IT BEFORE INITIALIZING EVERYTHING. i dont need to set commandpool as the parameter.
 
         // 1. The 3D Scene Container
         Scene3D scene = new Scene3D(1280, 720);
@@ -20,9 +21,10 @@ public class Main {
         scene.init(); // Init the camera
 
         // 2. High-Level Entity Creation
-        int texture = TextureLoader.loadTexture("images/brat.png", MasterRenderer.getCommandPool());
-        Entity ent = new Entity(Mesh.CUBE, texture);
-        ent.setPosition(0, 0, -2f);
+        Mesh fox = MeshLoader.loadObject("obj/fox.obj");
+        int texture = TextureLoader.loadTexture("images/fox.jpg");
+        Entity ent = new Entity(fox, texture);
+        ent.setPosition(0, 0, -200f);
         ent.moveRotate(0f, 90f, 0f, -1f); // 90 degrees per second, infinite
         scene.addEntity(ent);
 

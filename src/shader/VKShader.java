@@ -157,6 +157,15 @@ public final class VKShader {
                         .cullMode(VK_CULL_MODE_BACK_BIT)
                         .frontFace(VK_FRONT_FACE_CLOCKWISE);
 
+                // [NEW] 5.1. Depth Testing!
+                VkPipelineDepthStencilStateCreateInfo depthStencil = VkPipelineDepthStencilStateCreateInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO)
+                        .depthTestEnable(true)
+                        .depthWriteEnable(true)
+                        .depthCompareOp(VK_COMPARE_OP_LESS) // Only draw pixels that are CLOSER to the camera
+                        .depthBoundsTestEnable(false)
+                        .stencilTestEnable(false);
+
                 // 6. Multisampling
                 VkPipelineMultisampleStateCreateInfo multisampling = VkPipelineMultisampleStateCreateInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO).sampleShadingEnable(false).rasterizationSamples(VK_SAMPLE_COUNT_1_BIT);
 
@@ -204,6 +213,7 @@ public final class VKShader {
                 pipelineInfo.pInputAssemblyState(inputAssembly);
                 pipelineInfo.pViewportState(viewportState);
                 pipelineInfo.pRasterizationState(rasterizer);
+                pipelineInfo.pDepthStencilState(depthStencil); // [CRITICAL]: Add this line!
                 pipelineInfo.pMultisampleState(multisampling);
                 pipelineInfo.pColorBlendState(colorBlending);
                 pipelineInfo.layout(pipelineLayout);

@@ -6,6 +6,7 @@ import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.*;
+import util.VulkanUtils;
 
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
@@ -51,10 +52,15 @@ public class MasterRenderer {
     private static PointerBuffer pCommandBuffers;
     private static LongBuffer pSignalSemaphores;
     private static LongBuffer pSwapchains;
+    // --- DEPTH BUFFER ---
+    private static long depthImage;
+    private static long depthImageMemory;
+    private static long depthImageView;
 
     public static void setRenderer() {
         System.out.println("Initializing Vulkan Master Renderer...");
         createSwapchain();
+        createDepthResources();
         createImageViews();
         createRenderPass();
 
@@ -79,12 +85,20 @@ public class MasterRenderer {
         beginInfo = VkCommandBufferBeginInfo.calloc()
                 .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO);
 
-        clearValues = VkClearValue.calloc(1);
-        clearValues.color()
+        // [CHANGED]: Allocate 2 clear values
+        clearValues = VkClearValue.calloc(2);
+
+        // Color Clear
+        clearValues.get(0).color()
                 .float32(0, 0.1f)
                 .float32(1, 0.1f)
                 .float32(2, 0.15f)
                 .float32(3, 1.0f);
+
+        // Depth Clear
+        clearValues.get(1).depthStencil()
+                .depth(1.0f)
+                .stencil(0);
 
         renderArea = VkRect2D.calloc();
         renderArea.offset().set(0, 0);
@@ -233,26 +247,48 @@ public class MasterRenderer {
             colorAttachment.initialLayout(VK_IMAGE_LAYOUT_UNDEFINED);
             colorAttachment.finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
+            // [CHANGED: Now allocates 2 attachments instead of 1]
+            VkAttachmentDescription.Buffer attachments = VkAttachmentDescription.calloc(2, stack);
+
+            // 0: Color Attachment
+            attachments.get(0).format(swapchainImageFormat).samples(VK_SAMPLE_COUNT_1_BIT)
+                    .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR).storeOp(VK_ATTACHMENT_STORE_OP_STORE)
+                    .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                    .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED).finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+            // 1: Depth Attachment
+            attachments.get(1).format(VK_FORMAT_D32_SFLOAT).samples(VK_SAMPLE_COUNT_1_BIT)
+                    .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR).storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE) // Don't need to save depth after rendering
+                    .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                    .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED).finalLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
             VkAttachmentReference.Buffer colorAttachmentRef = VkAttachmentReference.calloc(1, stack);
             colorAttachmentRef.attachment(0);
             colorAttachmentRef.layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+            // [NEW] Reference the Depth attachment
+            VkAttachmentReference depthAttachmentRef = VkAttachmentReference.calloc(stack);
+            depthAttachmentRef.attachment(1).layout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
             VkSubpassDescription.Buffer subpass = VkSubpassDescription.calloc(1, stack);
             subpass.pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS);
             subpass.colorAttachmentCount(1);
             subpass.pColorAttachments(colorAttachmentRef);
+            subpass.pDepthStencilAttachment(depthAttachmentRef);
+
 
             VkSubpassDependency.Buffer dependency = VkSubpassDependency.calloc(1, stack);
             dependency.srcSubpass(VK_SUBPASS_EXTERNAL);
             dependency.dstSubpass(0);
-            dependency.srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+            // [CHANGED] Add Depth stages to dependency
+            dependency.srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT);
             dependency.srcAccessMask(0);
-            dependency.dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-            dependency.dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+            dependency.dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT);
+            dependency.dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
 
             VkRenderPassCreateInfo renderPassInfo = VkRenderPassCreateInfo.calloc(stack);
             renderPassInfo.sType(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO);
-            renderPassInfo.pAttachments(colorAttachment);
+            renderPassInfo.pAttachments(attachments); // [CHANGED] Pass the new 2-item buffer
             renderPassInfo.pSubpasses(subpass);
             renderPassInfo.pDependencies(dependency);
 
@@ -264,13 +300,69 @@ public class MasterRenderer {
         }
     }
 
+    private static int findMemoryType(int typeFilter, int properties) {
+        return VulkanUtils.findMemoryType(typeFilter, properties);
+    }
+
+    private static void createDepthResources() {
+        try (MemoryStack stack = stackPush()) {
+            VkDevice device = Display.getDevice();
+            int format = VK_FORMAT_D32_SFLOAT; // Standard high-precision depth format
+
+            // 1. Create the Image
+            VkImageCreateInfo imageInfo = VkImageCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO)
+                    .imageType(VK_IMAGE_TYPE_2D)
+                    .extent(VkExtent3D.calloc(stack).set(swapchainExtent.width(), swapchainExtent.height(), 1))
+                    .mipLevels(1).arrayLayers(1).format(format).tiling(VK_IMAGE_TILING_OPTIMAL)
+                    .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
+                    .usage(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+                    .sharingMode(VK_SHARING_MODE_EXCLUSIVE)
+                    .samples(VK_SAMPLE_COUNT_1_BIT);
+
+            LongBuffer pImage = stack.mallocLong(1);
+            if (vkCreateImage(device, imageInfo, null, pImage) != VK_SUCCESS) {
+                throw new RuntimeException("Failed to create depth image!");
+            }
+            depthImage = pImage.get(0);
+
+            // 2. Allocate GPU Memory
+            VkMemoryRequirements memRequirements = VkMemoryRequirements.calloc(stack);
+            vkGetImageMemoryRequirements(device, depthImage, memRequirements);
+
+            VkMemoryAllocateInfo allocInfo = VkMemoryAllocateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                    .allocationSize(memRequirements.size())
+                    .memoryTypeIndex(findMemoryType(memRequirements.memoryTypeBits(), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT));
+
+            LongBuffer pMemory = stack.mallocLong(1);
+            if (vkAllocateMemory(device, allocInfo, null, pMemory) != VK_SUCCESS) {
+                throw new RuntimeException("Failed to allocate depth image memory!");
+            }
+            depthImageMemory = pMemory.get(0);
+            vkBindImageMemory(device, depthImage, depthImageMemory, 0);
+
+            // 3. Create the Image View
+            VkImageViewCreateInfo viewInfo = VkImageViewCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO)
+                    .image(depthImage).viewType(VK_IMAGE_VIEW_TYPE_2D).format(format)
+                    .subresourceRange(r -> r.aspectMask(VK_IMAGE_ASPECT_DEPTH_BIT).baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1));
+
+            LongBuffer pView = stack.mallocLong(1);
+            if (vkCreateImageView(device, viewInfo, null, pView) != VK_SUCCESS) {
+                throw new RuntimeException("Failed to create depth image view!");
+            }
+            depthImageView = pView.get(0);
+        }
+    }
+
     private static void createFramebuffers() {
         VkDevice device = Display.getDevice();
         framebuffers = new long[swapchainImageViews.length];
 
         try (MemoryStack stack = stackPush()) {
-            LongBuffer attachments = stack.mallocLong(1);
             LongBuffer pFramebuffer = stack.mallocLong(1);
+            LongBuffer attachments = stack.mallocLong(2);
 
             VkFramebufferCreateInfo framebufferInfo = VkFramebufferCreateInfo.calloc(stack);
             framebufferInfo.sType(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO);
@@ -281,6 +373,7 @@ public class MasterRenderer {
 
             for (int i = 0; i < swapchainImageViews.length; i++) {
                 attachments.put(0, swapchainImageViews[i]);
+                attachments.put(1, depthImageView); // [NEW] Bind the depth image!
                 framebufferInfo.pAttachments(attachments);
 
                 if (vkCreateFramebuffer(device, framebufferInfo, null, pFramebuffer) != VK_SUCCESS) {
@@ -500,6 +593,7 @@ public class MasterRenderer {
     private static void cleanupSwapchain() {
         VkDevice device = Display.getDevice();
 
+
         for (long framebuffer : framebuffers) {
             vkDestroyFramebuffer(device, framebuffer, null);
         }
@@ -513,6 +607,15 @@ public class MasterRenderer {
         if (renderPass != VK_NULL_HANDLE) {
             vkDestroyRenderPass(device, renderPass, null);
         }
+
+        if (depthImageView != VK_NULL_HANDLE)
+            vkDestroyImageView(device, depthImageView, null);
+
+        if (depthImage != VK_NULL_HANDLE)
+            vkDestroyImage(device, depthImage, null);
+
+        if (depthImageMemory != VK_NULL_HANDLE)
+            vkFreeMemory(device, depthImageMemory, null);
 
         for (long imageView : swapchainImageViews) {
             vkDestroyImageView(device, imageView, null);
@@ -551,6 +654,7 @@ public class MasterRenderer {
         cleanupSwapchain();
 
         createSwapchain();
+        createDepthResources();
         createImageViews();
         createRenderPass();
 

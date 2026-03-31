@@ -4,7 +4,6 @@ import org.lwjgl.system.MemoryUtil;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import static org.lwjgl.stb.STBImage.*;
-import static renderer.MasterRenderer.getCommandPool;
 
 /**
  * AAA Fat-Jar Resource Loader & Bindless Texture Manager.
@@ -95,7 +94,7 @@ public class Resources {
         MemoryUtil.memFree(rawFileBuffer);
 
         // 4. Send it to the GPU via Staging Buffer!
-        int textureId = loader.TextureLoader.uploadToGPU(decodedImage, width[0], height[0], getCommandPool());
+        int textureId = loader.TextureLoader.uploadToGPU(decodedImage, width[0], height[0]);
 
         // 5. Free the STB decoded pixels from RAM now that the GPU has them
         stbi_image_free(decodedImage);
