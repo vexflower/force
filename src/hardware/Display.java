@@ -57,6 +57,9 @@ public final class Display {
     private static long debugMessenger;
     IntList displays = new IntList();
 
+    // --- [NEW] UI ROOT ---
+    private static ui.Container contentPane;
+
     private Display() {}
 
     public static void createDisplay(int index, int w, int h) {
@@ -90,6 +93,10 @@ public final class Display {
             public void invoke(long window, int newWidth, int newHeight) {
                 Display.width = newWidth;
                 Display.height = newHeight;
+                // Automatically stretch the Content Pane
+                if (contentPane != null) {
+                    contentPane.setSize(newWidth, newHeight);
+                }
             }
         };
         glfwSetWindowSizeCallback(window, windowSizeCallback);
@@ -347,6 +354,18 @@ public final class Display {
 
         glfwDestroyWindow(window);
         glfwTerminate();
+    }
+
+    public static void setContentPane(ui.Container pane) {
+        contentPane = pane;
+        // Instantly force it to match the current window size
+        if (contentPane != null) {
+            contentPane.setSize(width, height);
+        }
+    }
+
+    public static ui.Container getContentPane() {
+        return contentPane;
     }
 
     public static boolean shouldDisplayClose() { return glfwWindowShouldClose(window); }

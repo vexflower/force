@@ -36,16 +36,20 @@
       "url": "https://gemini.google.com/app/880e0ef67218067c"
     },
     {
-      "name": "",
-      "url": "gemini.google.com"
-    },
-    {
       "name": "YouTube",
       "url": "https://www.youtube.com/?feature=youtu.be"
     },
     {
       "name": "YouTube",
       "url": "https://www.youtube.com/?feature=youtu.be&themeRefresh=1"
+    },
+    {
+      "name": "gemini.google.com",
+      "url": "gemini.google.com"
+    },
+    {
+      "name": "Google Gemini",
+      "url": "https://gemini.google.com/app/a26b390819c06c8c"
     }
   ]
 }]]></component>

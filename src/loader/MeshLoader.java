@@ -13,6 +13,7 @@ import java.nio.IntBuffer;
 
 // [CHANGED: 1] Removed ALL org.lwjgl.opengl.* imports. Replaced with Vulkan 1.0
 import static org.lwjgl.vulkan.VK10.*;
+import static renderer.MasterRenderer.getCommandPool;
 
 /**
  * High-performance Vulkan MeshLoader.
@@ -39,22 +40,22 @@ public final class MeshLoader {
      * upload its data, and assign its vaoId directly.
      * We require the 'commandPool' to perform the Staging Buffer copies.
      */
-    public static void loadMesh(Mesh mesh, long commandPool) {
+    public static void loadMesh(Mesh mesh) {
         if (meshCount == vertexBuffers.length) expandArrays();
 
         int id = meshCount;
 
         // 1. Upload Positions (Vertices) to the GPU
-        long[] vData = createBufferFromFloatArray(mesh.positions, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, commandPool);
+        long[] vData = createBufferFromFloatArray(mesh.positions, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, getCommandPool());
         vertexBuffers[id] = vData[0];
         vertexMemories[id] = vData[1];
 
         // 2. Upload Indices to the GPU
-        long[] iData = createBufferFromIntArray(mesh.indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, commandPool);
+        long[] iData = createBufferFromIntArray(mesh.indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, getCommandPool());
         indexBuffers[id] = iData[0];
         indexMemories[id] = iData[1];
 
-        long[] uvData = createBufferFromFloatArray(mesh.textures, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, commandPool);
+        long[] uvData = createBufferFromFloatArray(mesh.textures, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, getCommandPool());
         uvBuffers[id] = uvData[0];
         uvMemories[id] = uvData[1];
 

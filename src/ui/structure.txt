@@ -1,0 +1,64 @@
+master renderer setting up
+
+add a 3d scene that acts as a container
+setting it up as content panel
+
+add entities in the 3d scene using addEntity() that is inherited from scene.java
+the process of addEntity():
+
+extract the id of the mesh
+extract the id of the textures
+extract the transform
+extract the material from the entity
+
+entity class is high level, which is fine (?) ish? because thats just part of the cpu logic and its fine
+if the entities would take around 200 MB of ram for hundreds of thousands of coordinates, as long as it will be
+transferred to the gpu without any bottleneck. which means, we might have to process everything with a hashmap
+with a string or charsequuence that handles all the stuff, changes the stuff, or use indexes to see which array
+will be used to process everything, unless we really can do instanced rendering, doesnt matter if the meshes are different
+(if thats even poossible), please challenge me and try to make it zero GC as possible
+
+also, we dont really need to complicate the matrix calculations on the containers (as frames) because theyre just ndc locations
+that just needs calculation from the screen all at once (or off screen on the framebuffer) so i hope we can address that.
+
+so the main should be like this:
+
+package engine;
+
+import environment.RendererManager;
+import hardware.Display;
+import lang.GeomMath;
+import lang.Mat4;
+import renderer.MasterRenderer;
+import ui.Panel;
+import ui.scene.Scene3D;
+
+public class Main {
+    static void main(String[] args) {
+        Display.createDisplay(0, 1280, 720);
+        Display.setShowFPSTitle(true);
+        MasterRenderer.setRenderer();
+
+        Scene3D scene = new Scene(1280, 720)
+        Display.setContentPane(scene);
+
+        int texture = TextureLoader.loadTexture("brat");
+        Entity ent = new Entity(mesh: Mesh.CUBE, texture: texture);
+        ent.setPosition(0, 0, -2f);
+        ent.moveRotate(0f, 200f, 0f, -1f (infinite movement)); // 200 degrees per second
+
+        scene.addEntity(ent);
+
+        // 2. A standard UI Panel (Static size)
+        // panel should already call init() by itself btw...
+        Panel myPanel = new Panel(300, 300);
+        myPanel.setBackgroundColor(0.8f, 0.1f, 0.1f, 0.7f);
+        myPanel.setPosition(50, 50);
+        scene.add(myPanel);
+
+        // Run the completely generic engine
+        GameEngine.start();
+    }
+}
+
+

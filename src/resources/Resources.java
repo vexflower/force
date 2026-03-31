@@ -4,6 +4,7 @@ import org.lwjgl.system.MemoryUtil;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import static org.lwjgl.stb.STBImage.*;
+import static renderer.MasterRenderer.getCommandPool;
 
 /**
  * AAA Fat-Jar Resource Loader & Bindless Texture Manager.
@@ -67,7 +68,10 @@ public class Resources {
      * @return The Bindless Texture Array ID (Integer Handle)
      */
     // [CHANGED: Added commandPool parameter and wired it to TextureLoader]
-    public static int loadTexture(String path, long commandPool) {
+    public static int loadTexture(String path) {
+
+        // make sure that the master renderer has set before calling this
+
         System.out.println("Streaming Texture to Off-Heap: " + path);
 
         // 1. Stream the raw ZIP/JAR bytes into C-Memory
@@ -91,7 +95,7 @@ public class Resources {
         MemoryUtil.memFree(rawFileBuffer);
 
         // 4. Send it to the GPU via Staging Buffer!
-        int textureId = loader.TextureLoader.uploadToGPU(decodedImage, width[0], height[0], commandPool);
+        int textureId = loader.TextureLoader.uploadToGPU(decodedImage, width[0], height[0], getCommandPool());
 
         // 5. Free the STB decoded pixels from RAM now that the GPU has them
         stbi_image_free(decodedImage);

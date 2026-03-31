@@ -65,7 +65,7 @@ public class MasterRenderer {
         createFramebuffers();
         createCommandPool();
 
-        Mesh.initPrimitives(commandPool);
+        Mesh.initPrimitives();
 
         createCommandBuffer();
         createSyncObjects();

@@ -1,5 +1,6 @@
 package engine;
 
+import lang.Mat4;
 import loader.MeshLoader;
 import loader.TextureRegistry;
 import ui.scene.Scene;
@@ -15,26 +16,14 @@ public class GameEngine {
     private static final SharedState sharedState = new SharedState();
     // [NEW] The active scene!
     private static Scene currentScene;
-
-    // Replace public static void main(String... args) with this:
-    public static void start(Scene initialScene) {
-        currentScene = initialScene;
-
-        // 1. Spawn the Logic/Physics Thread
+    // Replace start(Scene) with parameterless start()
+    public static void start() {
         Thread logicThread = new Thread(GameEngine::runLogicLoop, "Logic-Thread");
         logicThread.start();
 
-        // 2. The Unlocked Render Loop
         while (!Display.shouldDisplayClose() && running) {
-            if (hardware.Keyboard.isKeyDown(hardware.Keyboard.ZERO)) {
-                System.out.println("F5 Pressed: Engine signaling Bootloader for Hotswap...");
-                running = false;
-            }
-
-            // Grab the latest snapshot instantly. No locks.
             RenderState currentFrame = sharedState.getFrontBuffer();
             MasterRenderer.render(currentFrame);
-
             Display.updateDisplay();
         }
 
@@ -45,7 +34,11 @@ public class GameEngine {
         // [THE FIX]: Force the CPU to wait until the GPU is completely idle
         org.lwjgl.vulkan.VK10.vkDeviceWaitIdle(hardware.Display.getDevice());
 
-        currentScene.destroy(); // Now it is safe to nuke the FBOs!
+        // Fetch the actual container from the Display instead of a null variable
+        ui.Container root = Display.getContentPane();
+        if (root != null) {
+            root.destroy(); // Safely nuke the FBOs!
+        }
 
         MasterRenderer.destroy();
         MeshLoader.destroy();
@@ -68,30 +61,24 @@ public class GameEngine {
             lastTime = now;
 
             while (delta >= 1) {
-                // [CHANGED] We delegate all logic to the Scene!
                 float deltaInSeconds = 1.0f / 60.0f;
-                currentScene.engineUpdate(deltaInSeconds);
 
-                // [NEW: Snapshot the state for the GPU!]
-                RenderState backBuffer = sharedState.getBackBuffer();
-                backBuffer.entityCount = currentScene.activeEntities.size();
+                ui.Container root = Display.getContentPane();
+                if (root != null) {
+                    root.update(deltaInSeconds); // Ticks the whole tree
+                    root.updateTransform(0,  0, root.isDirty); // Cascades the math
 
-                for (int i = 0; i < backBuffer.entityCount; i++) {
-                    int eId = currentScene.activeEntities.get(i);
-                    backBuffer.meshIds[i] = environment.RendererManager.meshIds.get(eId);
-                    backBuffer.textureIds[i] = environment.RendererManager.diffuseTextureIds.get(eId);
+                    RenderState backBuffer = sharedState.getBackBuffer();
+                    backBuffer.entityCount = 0;
+                    backBuffer.uiElementCount = 0;
+                    backBuffer.fboUpdateCount = 0;
 
-                    // Copy the 16 floats directly to avoid GC allocations
-                    for (int f = 0; f < 16; f++) {
-                        backBuffer.transforms[(i * 16) + f] = environment.RendererManager.transforms.get((eId * 16) + f);
-                    }
+                    // Harvest all data from the tree!
+                    root.extract3DEntities(backBuffer);
+                    root.extractUIData(backBuffer);
+
+                    sharedState.swap();
                 }
-
-                // [NEW] Extract the FBO UI data!
-                currentScene.extractUIData(backBuffer);
-
-                // We still tell the sharedState to swap so the Render Thread grabs the newest data
-                sharedState.swap();
                 delta--;
             }
 

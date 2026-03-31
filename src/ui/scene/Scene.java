@@ -4,12 +4,14 @@ import environment.RendererManager;
 import lang.Mat4;
 import renderer.RenderState;
 import ui.Container;
+import util.FastList;
 import util.IntList;
 import hardware.Display; // [NEW] Needed to poll the screen size
 
 public abstract class Scene extends Container {
 
-    public IntList activeEntities = new IntList();
+    // Replaced IntList with FastList<Entity>
+    public FastList<entity.Entity> activeEntities = new FastList<>();
     private final Mat4 orthoProjection = new Mat4();
 
     // [NEW] Track screen dimensions to detect resizes
@@ -40,7 +42,7 @@ public abstract class Scene extends Container {
         this.isDirty = true;
     }
 
-    public abstract void init(long commandPool);
+    public abstract void init();
     public abstract void update(float delta);
 
     // [NEW] Hook for subclasses (like Scene3D) to update their Perspective matrices
@@ -71,19 +73,21 @@ public abstract class Scene extends Container {
         super.update(delta);
 
         // [THE FIX]: Pass the pure Identity Matrix! No more double-projection!
-        this.updateTransform(ROOT_PIXEL_MATRIX, screenResized);
+        this.updateTransform(0, 0, screenResized);
     }
 
-    public int addEntity() {
-        int id = RendererManager.createEntity();
-        activeEntities.add(id);
-        return id;
+    public void addEntity(entity.Entity ent) {
+        activeEntities.add(ent);
     }
 
+    // [FIX]: Replace your extractUIData with this, and DELETE the extractContainer() method entirely!
+    @Override
     public void extractUIData(RenderState state) {
         state.uiElementCount = 0;
         state.fboUpdateCount = 0;
-        extractContainer(this, state);
+
+        // Let the master Container class do the heavy lifting so it hits the init() checks!
+        super.extractUIData(state);
     }
 
     private void extractContainer(Container container, RenderState state) {

@@ -8,7 +8,7 @@ public class Scene2D extends Scene
     }
 
     @Override
-    public void init(long commandPool)
+    public void init()
     {
 
     }

@@ -122,10 +122,10 @@ public class Mesh {
 
     // [CHANGED: 2] We created an explicit method that takes the commandPool.
     // We will call this manually from the MasterRenderer once Vulkan is alive.
-    public static void initPrimitives(long commandPool) {
+    public static void initPrimitives() {
         System.out.println("Uploading primitive meshes to GPU...");
-        MeshLoader.loadMesh(SQUARE, commandPool);
-        MeshLoader.loadMesh(CUBE, commandPool);
+        MeshLoader.loadMesh(SQUARE);
+        MeshLoader.loadMesh(CUBE);
     }
 
     public static Mesh importObject(String fileName) {
