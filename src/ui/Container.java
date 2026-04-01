@@ -13,7 +13,7 @@ import util.FastList;
  * Manages the zero-GC child hierarchy, dirty-state propagation,
  * and absolute screen-space matrix calculations.
  */
-public abstract class Container extends FrameBufferObject {
+public class Container extends FrameBufferObject {
 
     public float localX = 0f;
     public float localY = 0f;
@@ -117,7 +117,7 @@ public abstract class Container extends FrameBufferObject {
     public void extractUIData(RenderState state) {
         // [NEW]: Check if it's an FBO that hasn't been initialized yet
         if (this.textureId == -1 && this.width > 0 && this.height > 0) {
-            this.init(); // Auto-init just in time!
+            this.init();
         }
 
         if (this.textureId != -1 && state.uiElementCount < 100) {

@@ -40,8 +40,6 @@ public class Camera {
         float mouseX = Mouse.getX();
         float mouseY = Mouse.getY();
 
-        System.out.println(Mouse.getX() + " " + Mouse.getY());
-
         if (Mouse.isButtonDown(Mouse.RIGHT)) {
             if (firstMouse) {
                 lastMouseX = mouseX;

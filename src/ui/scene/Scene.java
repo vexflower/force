@@ -1,14 +1,12 @@
 package ui.scene;
 
-import environment.RendererManager;
 import lang.Mat4;
 import renderer.RenderState;
 import ui.Container;
 import util.FastList;
-import util.IntList;
 import hardware.Display; // [NEW] Needed to poll the screen size
 
-public abstract class Scene extends Container {
+public class Scene extends Container {
 
     // Replaced IntList with FastList<Entity>
     public FastList<entity.Entity> activeEntities = new FastList<>();
@@ -41,9 +39,6 @@ public abstract class Scene extends Container {
         this.add(panel);
         this.isDirty = true;
     }
-
-    public abstract void init();
-    public abstract void update(float delta);
 
     // [NEW] Hook for subclasses (like Scene3D) to update their Perspective matrices
     protected void onResize(int width, int height) {}
@@ -80,15 +75,6 @@ public abstract class Scene extends Container {
         activeEntities.add(ent);
     }
 
-    // [FIX]: Replace your extractUIData with this, and DELETE the extractContainer() method entirely!
-    @Override
-    public void extractUIData(RenderState state) {
-        state.uiElementCount = 0;
-        state.fboUpdateCount = 0;
-
-        // Let the master Container class do the heavy lifting so it hits the init() checks!
-        super.extractUIData(state);
-    }
 
     private void extractContainer(Container container, RenderState state) {
         if (container.textureId != -1 && state.uiElementCount < 100) {

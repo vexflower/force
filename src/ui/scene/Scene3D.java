@@ -7,6 +7,11 @@ public class Scene3D extends Scene {
 
     protected Mat4 projectionMatrix = new Mat4();
     private final Mat4 vpMatrix = new Mat4();
+    private float fov = 70f;
+    private float zNear = .1f;
+    private float zFar = 10_000f;
+    // [NEW]: Determines if this scene is allowed to move the camera
+    public boolean updatesCamera = true;
 
     // [NEW] The dedicated camera for this 3D view
     private Camera currentCamera;
@@ -29,14 +34,17 @@ public class Scene3D extends Scene {
     protected void onResize(int width, int height) {
         if (height == 0) height = 1;
         float aspect = (float) width / (float) height;
-        projectionMatrix.perspective(70f, aspect, 0.1f, 1000f);
+        // [THE FIX]: Use your new variables instead of hardcoded 70f, 0.1f, 1000f
+        projectionMatrix.perspective(this.fov, aspect, this.zNear, this.zFar);
     }
 
     @Override
     public void update(float delta) {
         if (currentCamera != null) {
-            // 1. Tick the Camera's input logic
-            currentCamera.move(delta);
+            /// [THE FIX]: Only move the camera if this scene has permission!
+            if (this.updatesCamera) {
+                currentCamera.move(delta);
+            }
 
             // 2. Combine Camera View and Scene Projection once per frame
             projectionMatrix.mul(currentCamera.viewMatrix, vpMatrix);
@@ -46,5 +54,8 @@ public class Scene3D extends Scene {
                 activeEntities.get(i).update(delta, vpMatrix);
             }
         }
+
+        // [THE FIX]: Pass the engine tick down to all children (like scene2)!
+        super.update(delta);
     }
 }

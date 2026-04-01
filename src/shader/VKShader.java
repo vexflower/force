@@ -162,7 +162,8 @@ public final class VKShader {
                         .sType(VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO)
                         .depthTestEnable(true)
                         .depthWriteEnable(true)
-                        .depthCompareOp(VK_COMPARE_OP_LESS) // Only draw pixels that are CLOSER to the camera
+                        // [THE FIX]: Change LESS to LESS_OR_EQUAL so UI panels at Z=0.0 can stack!
+                        .depthCompareOp(VK_COMPARE_OP_LESS_OR_EQUAL)
                         .depthBoundsTestEnable(false)
                         .stencilTestEnable(false);
 

@@ -12,8 +12,6 @@ public class Panel extends Container {
 
     public Panel(int width, int height) {
         super(width, height);
-        // By calling super(width, height), this Panel is now ready
-        // to have init() called on it to generate its Vulkan FBO.
     }
 
     // You can add Panel-specific properties here later, like:
