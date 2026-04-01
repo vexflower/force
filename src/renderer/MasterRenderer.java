@@ -56,6 +56,8 @@ public class MasterRenderer {
     private static long depthImage;
     private static long depthImageMemory;
     private static long depthImageView;
+    // Underneath your other static variables...
+    private static final float[] FBO_MATRIX_SCRATCH = new float[16];
 
     public static void setRenderer() {
         System.out.println("Initializing Vulkan Master Renderer...");
@@ -494,11 +496,38 @@ public class MasterRenderer {
             ui.FrameBufferObject fbo = state.fboQueue[i];
             fbo.bind(commandBuffers[currentFrame]);
 
-            // Phase 5 will go here: Drawing the UI components inside the FBO
+            // [THE FIX]: Phase 5 - Draw encapsulated 3D entities natively inside their FBO!
+            if (fbo instanceof ui.scene.Scene scene && !scene.activeEntities.isEmpty()) {
+                try (MemoryStack stack = MemoryStack.stackPush()) {
+                    // Bind the pipeline and global texture phonebook inside the FBO!
+                    vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, shader.VKShader.EntityShaderPipeline.pipeline.graphicsPipeline);
+                    vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            shader.VKShader.EntityShaderPipeline.pipeline.pipelineLayout,
+                            0, stack.longs(shader.VKShader.bindlessDescriptorSet), null);
+
+                    for(int j = 0; j < scene.activeEntities.size(); j++) {
+                        entity.Entity ent = scene.activeEntities.get(j);
+                        int meshId = environment.RendererManager.meshIds.get(ent.id);
+                        int texId = environment.RendererManager.diffuseTextureIds.get(ent.id);
+
+                        LongBuffer vertexBuffers = stack.longs(loader.MeshLoader.getVertexBuffer(meshId), loader.MeshLoader.getUvBuffer(meshId));
+                        vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, vertexBuffers, stack.longs(0, 0));
+                        vkCmdBindIndexBuffer(commandBuffers[currentFrame], loader.MeshLoader.getIndexBuffer(meshId), 0, VK_INDEX_TYPE_UINT32);
+
+                        // Pull the pre-calculated matrix straight from the Engine Room
+                        for(int f=0; f<16; f++) FBO_MATRIX_SCRATCH[f] = environment.RendererManager.transforms.get((ent.id * 16) + f);
+                        shader.VKShader.EntityShaderPipeline.loadTransformationMatrixArray(commandBuffers[currentFrame], FBO_MATRIX_SCRATCH, 0);
+
+                        vkCmdPushConstants(commandBuffers[currentFrame], shader.VKShader.EntityShaderPipeline.pipeline.pipelineLayout,
+                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 64, stack.ints(texId, 0));
+
+                        vkCmdDrawIndexed(commandBuffers[currentFrame], loader.MeshLoader.getIndexCount(meshId), 1, 0, 0, 0);
+                    }
+                }
+            }
 
             fbo.unbind(commandBuffers[currentFrame]);
         }
-
 
         // ========================================================================
         // MAIN SWAPCHAIN PASS (Drawing to the Screen)
@@ -721,6 +750,10 @@ public class MasterRenderer {
         }
     }
 
+    public static int getSwapchainImageFormat()
+    {
+        return swapchainImageFormat;
+    }
     public static long getCommandPool() {
         return commandPool;
     }

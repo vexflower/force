@@ -3,7 +3,7 @@ package ui;
 import hardware.Display;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.*;
-import util.VulkanUtils;
+import renderer.MasterRenderer;
 
 import java.nio.LongBuffer;
 
@@ -11,31 +11,33 @@ import static org.lwjgl.system.MemoryStack.stackPush;
 import static org.lwjgl.vulkan.VK10.*;
 
 /**
- * The Vulkan Off-Screen Render Target.
- * Any class extending this gets its own private texture in GPU memory,
- * automatically mapped to the Bindless Texture Phonebook.
+ * The Vulkan Off-Screen Render Target (True Viewport).
+ * Features a private Color and Depth buffer for isolated 3D sorting.
  */
 public class FrameBufferObject {
     public int width;
     public int height;
 
-    // The Bindless ID! Used to draw this FBO onto a 3D plane or a UI quad.
     public int textureId = -1;
 
-    // 64-bit Vulkan Pointers
     public long vkFramebuffer;
     public long vkRenderPass;
+
+    // Private Color Buffer
     public long colorImage;
     public long colorImageMemory;
     public long colorImageView;
-    // ... right below your existing fields ...
     public long sampler;
 
-    // --- NEW: FBO Background Color State ---
+    // --- NEW: Private Depth Buffer ---
+    public long depthImage;
+    public long depthImageMemory;
+    public long depthImageView;
+
     public float bgR = 0.0f;
     public float bgG = 0.0f;
     public float bgB = 0.0f;
-    public float bgA = 0.0f; // Defaults to transparent
+    public float bgA = 0.0f;
 
     private VkRenderPassBeginInfo renderPassInfo;
     private VkClearValue.Buffer clearValues;
@@ -45,129 +47,211 @@ public class FrameBufferObject {
         this.height = height;
     }
 
-    /**
-     * Initializes the FBO on the GPU. Does not require a CommandPool because
-     * the layout transitions happen automatically via the Render Pass dependencies.
-     */
     public void init() {
-        VkDevice device = Display.getDevice();
-
-        // 1. Create the physical image and memory (Using UNORM for UI to avoid double-gamma correction)
-        int format = VK_FORMAT_R8G8B8A8_UNORM;
-        colorImage = VulkanUtils.createImage(width, height, format, VK_IMAGE_TILING_OPTIMAL,
-                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-        colorImageMemory = VulkanUtils.allocateImageMemory(colorImage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        vkBindImageMemory(device, colorImage, colorImageMemory, 0);
-
-        // 2. Create the View and Sampler
-        colorImageView = VulkanUtils.createImageView(colorImage, format);
-        sampler = VulkanUtils.createTextureSampler();
-
-        // 3. Register into the Global Bindless Array!
-        textureId = loader.TextureRegistry.add(colorImage, colorImageMemory, colorImageView, sampler);
-        shader.VKShader.updateBindlessTexture(textureId, colorImageView, sampler);
-
-        // 4. Create the FBO-specific Render Pass
-        createRenderPass(device, format);
-
-        // 5. Create the Framebuffer linking the Image to the Render Pass
-        createFramebuffer(device);
-
-        // 6. Pre-allocate Render Pass structs for Zero-GC looping
-        initRenderStructs();
-    }
-
-    private void createRenderPass(VkDevice device, int format) {
         try (MemoryStack stack = stackPush()) {
-            VkAttachmentDescription.Buffer colorAttachment = VkAttachmentDescription.calloc(1, stack);
-            colorAttachment.format(format);
-            colorAttachment.samples(VK_SAMPLE_COUNT_1_BIT);
-            colorAttachment.loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR); // Clear old UI every frame
-            colorAttachment.storeOp(VK_ATTACHMENT_STORE_OP_STORE); // Keep the result for sampling
-            colorAttachment.stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE);
-            colorAttachment.stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE);
-            colorAttachment.initialLayout(VK_IMAGE_LAYOUT_UNDEFINED);
-            colorAttachment.finalLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL); // Ready to be drawn as a texture!
+            VkDevice device = Display.getDevice();
 
-            VkAttachmentReference.Buffer colorAttachmentRef = VkAttachmentReference.calloc(1, stack);
-            colorAttachmentRef.attachment(0);
-            colorAttachmentRef.layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+            int exactFormat = MasterRenderer.getSwapchainImageFormat();
 
-            VkSubpassDescription.Buffer subpass = VkSubpassDescription.calloc(1, stack);
-            subpass.pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS);
-            subpass.colorAttachmentCount(1);
-            subpass.pColorAttachments(colorAttachmentRef);
+            // 1. Create Color Image (Standard RGBA)
+            VkImageCreateInfo imageInfo = VkImageCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO)
+                    .imageType(VK_IMAGE_TYPE_2D)
+                    .extent(VkExtent3D.calloc(stack).set(width, height, 1))
+                    .mipLevels(1).arrayLayers(1)
+                    .format(exactFormat)
+                    .tiling(VK_IMAGE_TILING_OPTIMAL)
+                    .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
+                    .usage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
+                    .sharingMode(VK_SHARING_MODE_EXCLUSIVE)
+                    .samples(VK_SAMPLE_COUNT_1_BIT);
 
-            // Critical: Ensure the main pass waits for this FBO to finish drawing before trying to sample it
-            VkSubpassDependency.Buffer dependency = VkSubpassDependency.calloc(2, stack);
-            dependency.get(0).srcSubpass(VK_SUBPASS_EXTERNAL);
-            dependency.get(0).dstSubpass(0);
-            dependency.get(0).srcStageMask(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-            dependency.get(0).dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-            dependency.get(0).srcAccessMask(VK_ACCESS_SHADER_READ_BIT);
-            dependency.get(0).dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+            LongBuffer pImage = stack.mallocLong(1);
+            vkCreateImage(device, imageInfo, null, pImage);
+            colorImage = pImage.get(0);
 
-            dependency.get(1).srcSubpass(0);
-            dependency.get(1).dstSubpass(VK_SUBPASS_EXTERNAL);
-            dependency.get(1).srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-            dependency.get(1).dstStageMask(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-            dependency.get(1).srcAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-            dependency.get(1).dstAccessMask(VK_ACCESS_SHADER_READ_BIT);
+            // Allocate Color Memory
+            VkMemoryRequirements memReqs = VkMemoryRequirements.calloc(stack);
+            vkGetImageMemoryRequirements(device, colorImage, memReqs);
 
-            VkRenderPassCreateInfo renderPassInfo = VkRenderPassCreateInfo.calloc(stack);
-            renderPassInfo.sType(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO);
-            renderPassInfo.pAttachments(colorAttachment);
-            renderPassInfo.pSubpasses(subpass);
-            renderPassInfo.pDependencies(dependency);
+            VkMemoryAllocateInfo allocInfo = VkMemoryAllocateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                    .allocationSize(memReqs.size())
+                    .memoryTypeIndex(findMemoryType(memReqs.memoryTypeBits(), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT));
+
+            LongBuffer pMemory = stack.mallocLong(1);
+            vkAllocateMemory(device, allocInfo, null, pMemory);
+            colorImageMemory = pMemory.get(0);
+            vkBindImageMemory(device, colorImage, colorImageMemory, 0);
+
+            // Create Color View
+            VkImageViewCreateInfo viewInfo = VkImageViewCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO)
+                    .image(colorImage).viewType(VK_IMAGE_VIEW_TYPE_2D).format(exactFormat)
+                    .subresourceRange(r -> r.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).levelCount(1).layerCount(1));
+
+            LongBuffer pView = stack.mallocLong(1);
+            vkCreateImageView(device, viewInfo, null, pView);
+            colorImageView = pView.get(0);
+
+            // --- NEW: 1.5 Create Private Depth Image ---
+            VkImageCreateInfo depthInfo = VkImageCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO)
+                    .imageType(VK_IMAGE_TYPE_2D)
+                    .extent(VkExtent3D.calloc(stack).set(width, height, 1))
+                    .mipLevels(1).arrayLayers(1)
+                    .format(VK_FORMAT_D32_SFLOAT)
+                    .tiling(VK_IMAGE_TILING_OPTIMAL)
+                    .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
+                    .usage(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+                    .sharingMode(VK_SHARING_MODE_EXCLUSIVE)
+                    .samples(VK_SAMPLE_COUNT_1_BIT);
+
+            vkCreateImage(device, depthInfo, null, pImage);
+            depthImage = pImage.get(0);
+
+            vkGetImageMemoryRequirements(device, depthImage, memReqs);
+            allocInfo.allocationSize(memReqs.size());
+            allocInfo.memoryTypeIndex(findMemoryType(memReqs.memoryTypeBits(), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT));
+
+            vkAllocateMemory(device, allocInfo, null, pMemory);
+            depthImageMemory = pMemory.get(0);
+            vkBindImageMemory(device, depthImage, depthImageMemory, 0);
+
+            VkImageViewCreateInfo depthViewInfo = VkImageViewCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO)
+                    .image(depthImage).viewType(VK_IMAGE_VIEW_TYPE_2D).format(VK_FORMAT_D32_SFLOAT)
+                    .subresourceRange(r -> r.aspectMask(VK_IMAGE_ASPECT_DEPTH_BIT).levelCount(1).layerCount(1));
+
+            vkCreateImageView(device, depthViewInfo, null, pView);
+            depthImageView = pView.get(0);
+
+            // Create Sampler for the Bindless Array
+            VkSamplerCreateInfo samplerInfo = VkSamplerCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO)
+                    .magFilter(VK_FILTER_LINEAR).minFilter(VK_FILTER_LINEAR)
+                    .addressModeU(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                    .addressModeV(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                    .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                    .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR);
+
+            LongBuffer pSampler = stack.mallocLong(1);
+            vkCreateSampler(device, samplerInfo, null, pSampler);
+            sampler = pSampler.get(0);
+
+            // Register into the global texture array
+            this.textureId = loader.TextureRegistry.add(colorImage, colorImageMemory, colorImageView, sampler);
+
+            // ---> [THE FIX]: Tell the GPU's Descriptor Set that this FBO texture exists! <---
+            shader.VKShader.updateBindlessTexture(this.textureId, colorImageView, sampler);
+
+            // 2. Create the Off-Screen Render Pass (Now with TWO attachments)
+            VkAttachmentDescription.Buffer attachments = VkAttachmentDescription.calloc(2, stack);
+
+            // Color Attachment (Formats it so the shader can read it as a texture later)
+            // [THE FIX]: Change VK_FORMAT_R8G8B8A8_UNORM to exactFormat here too!
+            attachments.get(0).format(exactFormat).samples(VK_SAMPLE_COUNT_1_BIT)
+                    .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR).storeOp(VK_ATTACHMENT_STORE_OP_STORE)
+                    .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                    .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED).finalLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+            // Depth Attachment
+            attachments.get(1).format(VK_FORMAT_D32_SFLOAT).samples(VK_SAMPLE_COUNT_1_BIT)
+                    .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR).storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                    .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                    .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED).finalLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+            VkAttachmentReference.Buffer colorRef = VkAttachmentReference.calloc(1, stack)
+                    .attachment(0).layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+            VkAttachmentReference depthRef = VkAttachmentReference.calloc(stack)
+                    .attachment(1).layout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+            VkSubpassDescription.Buffer subpass = VkSubpassDescription.calloc(1, stack)
+                    .pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS)
+                    .colorAttachmentCount(1)
+                    .pColorAttachments(colorRef)
+                    .pDepthStencilAttachment(depthRef); // Bind private depth buffer
+
+            VkSubpassDependency.Buffer dependencies = VkSubpassDependency.calloc(2, stack);
+            // Dependency 0: Coming IN to the FBO
+            dependencies.get(0).srcSubpass(VK_SUBPASS_EXTERNAL).dstSubpass(0)
+                    .srcStageMask(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
+                    // [THE FIX]: Added EARLY_FRAGMENT_TESTS_BIT
+                    .dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
+                    .srcAccessMask(VK_ACCESS_SHADER_READ_BIT)
+                    // [THE FIX]: Added DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+                    .dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
+                    .dependencyFlags(VK_DEPENDENCY_BY_REGION_BIT);
+
+            // Dependency 1: Going OUT of the FBO
+            dependencies.get(1).srcSubpass(0).dstSubpass(VK_SUBPASS_EXTERNAL)
+                    // [THE FIX]: Added LATE_FRAGMENT_TESTS_BIT
+                    .srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT)
+                    .dstStageMask(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
+                    // [THE FIX]: Added DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+                    .srcAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
+                    .dstAccessMask(VK_ACCESS_SHADER_READ_BIT)
+                    .dependencyFlags(VK_DEPENDENCY_BY_REGION_BIT);
+
+            VkRenderPassCreateInfo renderPassInfoCI = VkRenderPassCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO)
+                    .pAttachments(attachments)
+                    .pSubpasses(subpass)
+                    .pDependencies(dependencies);
 
             LongBuffer pRenderPass = stack.mallocLong(1);
-            if (vkCreateRenderPass(device, renderPassInfo, null, pRenderPass) != VK_SUCCESS) {
-                throw new RuntimeException("Failed to create FBO Render Pass!");
-            }
+            vkCreateRenderPass(device, renderPassInfoCI, null, pRenderPass);
             vkRenderPass = pRenderPass.get(0);
-        }
-    }
 
-    private void createFramebuffer(VkDevice device) {
-        try (MemoryStack stack = stackPush()) {
-            VkFramebufferCreateInfo framebufferInfo = VkFramebufferCreateInfo.calloc(stack);
-            framebufferInfo.sType(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO);
-            framebufferInfo.renderPass(vkRenderPass);
-            framebufferInfo.pAttachments(stack.longs(colorImageView));
-            framebufferInfo.width(width);
-            framebufferInfo.height(height);
-            framebufferInfo.layers(1);
+            // 3. Create the Framebuffer (Binding both Color and Depth views)
+            LongBuffer fbAttachments = stack.mallocLong(2);
+            fbAttachments.put(0, colorImageView);
+            fbAttachments.put(1, depthImageView); // Inject depth!
+
+            VkFramebufferCreateInfo fboInfo = VkFramebufferCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO)
+                    .renderPass(vkRenderPass)
+                    .pAttachments(fbAttachments)
+                    .width(width).height(height).layers(1);
 
             LongBuffer pFramebuffer = stack.mallocLong(1);
-            if (vkCreateFramebuffer(device, framebufferInfo, null, pFramebuffer) != VK_SUCCESS) {
-                throw new RuntimeException("Failed to create FBO Framebuffer!");
-            }
+            vkCreateFramebuffer(device, fboInfo, null, pFramebuffer);
             vkFramebuffer = pFramebuffer.get(0);
+
+            // 4. Pre-allocate the RenderPass Begin Info (Zero-GC execution)
+            renderPassInfo = VkRenderPassBeginInfo.calloc()
+                    .sType(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO)
+                    .renderPass(vkRenderPass)
+                    .framebuffer(vkFramebuffer);
+            renderPassInfo.renderArea().offset().set(0, 0);
+            renderPassInfo.renderArea().extent().set(width, height);
+
+            // Allocate 2 Clear Values (Color and Depth)
+            clearValues = VkClearValue.calloc(2);
+            clearValues.get(0).color().float32(0, bgR).float32(1, bgG).float32(2, bgB).float32(3, bgA);
+            clearValues.get(1).depthStencil().depth(1.0f).stencil(0);
+            renderPassInfo.pClearValues(clearValues);
         }
     }
 
-    // ... scroll down to initRenderStructs() ...
-
-    private void initRenderStructs() {
-        // Pre-allocate structs to avoid GC allocations during the render loop
-        clearValues = VkClearValue.calloc(1);
-
-        // [CHANGED]: Use the dynamic color state instead of hardcoded 0.0f
-        clearValues.color().float32(0, bgR).float32(1, bgG).float32(2, bgB).float32(3, bgA);
-
-        renderPassInfo = VkRenderPassBeginInfo.calloc()
-                .sType(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO)
-                .renderPass(vkRenderPass)
-                .framebuffer(vkFramebuffer)
-                .pClearValues(clearValues);
-
-        renderPassInfo.renderArea().offset().set(0, 0);
-        renderPassInfo.renderArea().extent().set(width, height);
+    // Helper method to find correct GPU memory type
+    private int findMemoryType(int typeFilter, int properties) {
+        VkPhysicalDeviceMemoryProperties memProperties = VkPhysicalDeviceMemoryProperties.calloc();
+        vkGetPhysicalDeviceMemoryProperties(Display.getPhysicalDevice(), memProperties);
+        for (int i = 0; i < memProperties.memoryTypeCount(); i++) {
+            if ((typeFilter & (1 << i)) != 0 && (memProperties.memoryTypes(i).propertyFlags() & properties) == properties) {
+                memProperties.free();
+                return i;
+            }
+        }
+        memProperties.free();
+        throw new RuntimeException("Failed to find suitable memory type for FBO!");
     }
+
     public void bind(VkCommandBuffer cmd) {
         vkCmdBeginRenderPass(cmd, renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        // Update viewport/scissor to match the FBO dimensions
         VkViewport.Buffer viewport = VkViewport.calloc(1).x(0.0f).y(0.0f).width(width).height(height).minDepth(0.0f).maxDepth(1.0f);
         vkCmdSetViewport(cmd, 0, viewport);
 
@@ -180,18 +264,14 @@ public class FrameBufferObject {
         scissor.free();
     }
 
-    /**
-     * Zero-GC color update. Directly mutates the off-heap Vulkan struct.
-     */
     public void setBackgroundColor(float r, float g, float b, float a) {
         this.bgR = r;
         this.bgG = g;
         this.bgB = b;
         this.bgA = a;
 
-        // If the FBO is already initialized, update the C-struct instantly
         if (clearValues != null) {
-            clearValues.color().float32(0, r).float32(1, g).float32(2, b).float32(3, a);
+            clearValues.get(0).color().float32(0, r).float32(1, g).float32(2, b).float32(3, a);
         }
     }
 
@@ -201,14 +281,23 @@ public class FrameBufferObject {
 
     public void destroy() {
         VkDevice device = Display.getDevice();
-        vkDestroyFramebuffer(device, vkFramebuffer, null);
-        vkDestroyRenderPass(device, vkRenderPass, null);
+        if (vkFramebuffer != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(device, vkFramebuffer, null);
+            vkDestroyRenderPass(device, vkRenderPass, null);
 
-        if (renderPassInfo != null) {
-            renderPassInfo.free();
-            clearValues.free();
+            // [THE FIX]: DELETE the 4 lines that used to be here!
+            // TextureRegistry owns the color texture now, so it will safely destroy them on shutdown.
+
+            // Cleanup Private Depth Buffer (We keep this because it IS NOT in the registry)
+            vkDestroyImageView(device, depthImageView, null);
+            vkDestroyImage(device, depthImage, null);
+            vkFreeMemory(device, depthImageMemory, null);
+
+            if (clearValues != null) clearValues.free();
+            if (renderPassInfo != null) renderPassInfo.free();
+
+            vkFramebuffer = VK_NULL_HANDLE;
+            this.textureId = -1;
         }
-
-        // Note: Image, Memory, View, and Sampler are handled by your TextureRegistry.destroy() [cite: 844-848]
     }
 }

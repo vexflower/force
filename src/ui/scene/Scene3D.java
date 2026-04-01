@@ -13,6 +13,9 @@ public class Scene3D extends Scene {
     // [NEW]: Determines if this scene is allowed to move the camera
     public boolean updatesCamera = true;
 
+    // [NEW] Toggle this to lock the firewall for stacked scenes!
+    public boolean isViewportPanel = false;
+
     // [NEW] The dedicated camera for this 3D view
     private Camera currentCamera;
 
@@ -28,6 +31,26 @@ public class Scene3D extends Scene {
     @Override
     public void init() {
         onResize(this.width, this.height);
+    }
+
+    @Override
+    public void extract3DEntities(renderer.RenderState state) {
+        if (!this.isViewportPanel) {
+            // I am the Main Window. I will send my 3D entities (The Fox) to the global pass.
+            super.extract3DEntities(state);
+        }
+        // when else:
+        // [THE FIREWALL]: I am a sealed JPanel! I will NOT leak my 3D entities to the global pass!
+        // Do absolutely nothing here. The FBO pass will handle it natively.
+    }
+
+    @Override
+    public void extractUIData(renderer.RenderState state) {
+        // [THE FIREWALL]: Guarantee FBO allocation before the UI tries to draw it!
+        if (this.textureId == -1 && this.isViewportPanel && this.width > 0 && this.height > 0) {
+            this.init();
+        }
+        super.extractUIData(state);
     }
 
     @Override

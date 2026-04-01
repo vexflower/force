@@ -95,21 +95,28 @@ public class Container extends FrameBufferObject {
         }
     }
 
-    // [NEW] Recursively hunts down 3D entities inside any embedded Scenes
     public void extract3DEntities(RenderState state) {
         if (this instanceof Scene scene) {
-            for (int i = 0; i < scene.activeEntities.size(); i++) {
-                Entity eId = scene.activeEntities.get(i);
-                int idx = state.entityCount++;
-                state.meshIds[idx] = RendererManager.meshIds.get(eId.id);
-                state.textureIds[idx] = RendererManager.diffuseTextureIds.get(eId.id);
-                for (int f = 0; f < 16; f++) {
-                    state.transforms[(idx * 16) + f] = RendererManager.transforms.get((eId.id * 16) + f);
+            // [THE FIX]: Only extract to the global pass if this is the Main Screen (textureId == -1)
+            // If textureId > -1, it's an FBO, and it will handle its own entities privately!
+            if (this.textureId == -1) {
+                for (int i = 0; i < scene.activeEntities.size(); i++) {
+                    Entity eId = scene.activeEntities.get(i);
+                    int idx = state.entityCount++;
+                    state.meshIds[idx] = RendererManager.meshIds.get(eId.id);
+                    state.textureIds[idx] = RendererManager.diffuseTextureIds.get(eId.id);
+
+                    for (int f = 0; f < 16; f++) {
+                        state.transforms[(idx * 16) + f] = RendererManager.transforms.get((eId.id * 16) + f);
+                    }
                 }
             }
         }
         for (int i = 0; i < children.size(); i++) {
-            children.get(i).extract3DEntities(state);
+            // [THE FIX]: Stop recursion! Don't dig into children if they are autonomous FBOs!
+            if (children.get(i).textureId == -1) {
+                children.get(i).extract3DEntities(state);
+            }
         }
     }
 

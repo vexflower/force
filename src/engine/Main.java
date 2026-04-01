@@ -22,11 +22,11 @@ public class Main {
         Display.setContentPane(scene);
 
         Scene3D scene2 = new Scene3D(1280, 720);
-        scene2.setPosition(0, 0);
-        scene2.setBackgroundColor(.4f, .4f, .4f, .8f);
+        scene2.isViewportPanel = true;
+        scene2.setBackgroundColor(.2f, .2f, .2f, 1f);
 
         Entity brat = new Entity(Mesh.CUBE, TextureLoader.loadTexture("images/brat.png"));
-        brat.setPosition(0, 0,20);
+        brat.setPosition(0, 0,-150);
         brat.setRotation(0, 200f, 0);
         scene2.addEntity(brat);
 
