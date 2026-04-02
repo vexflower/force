@@ -4,7 +4,6 @@ import lang.Mat4;
 import renderer.RenderState;
 import ui.Container;
 import util.FastList;
-import hardware.Display; // [NEW] Needed to poll the screen size
 
 public class Scene extends Container {
 
@@ -43,54 +42,54 @@ public class Scene extends Container {
     // [NEW] Hook for subclasses (like Scene3D) to update their Perspective matrices
     protected void onResize(int width, int height) {}
 
-    /**
-     * Engine-level tick called by GameEngine.java
-     */
-    public void engineUpdate(float delta) {
-        int dw = Display.getWidth();
-        int dh = Display.getHeight();
-        boolean screenResized = false;
-
-        if (dw != currentWidth || dh != currentHeight) {
-            currentWidth = dw;
-            currentHeight = dh;
-
-            // [THE SWING FIX]: Force the Root pane to exactly match the screen size!
-            if (contentPane != null) {
-                contentPane.setSize(dw, dh);
-            }
-
-            onResize(dw, dh);
-            screenResized = true;
-        }
-
-        update(delta);
-        super.update(delta);
-
-        // [THE FIX]: Pass the pure Identity Matrix! No more double-projection!
-        this.updateTransform(0, 0, screenResized);
-    }
-
     public void addEntity(entity.Entity ent) {
         activeEntities.add(ent);
     }
 
+    @Override
+    public void update(float delta) {
+        int dw = hardware.Display.getWidth();
+        int dh = hardware.Display.getHeight();
 
-    private void extractContainer(Container container, RenderState state) {
-        if (container.textureId != -1 && state.uiElementCount < 100) {
-            int index = state.uiElementCount++;
-            state.uiTextureIds[index] = container.textureId;
+        // If this is the Main Screen, constantly check for window resizes!
+        if (this.textureId == -1 && (dw != currentWidth || dh != currentHeight)) {
+            currentWidth = dw;
+            currentHeight = dh;
+            this.width = dw;
+            this.height = dh;
+            if (contentPane != null) contentPane.setSize(dw, dh);
+            onResize(dw, dh); // Recalculates the Matrix!
+        }
 
-            // [THE FIX]: We push the Render Transform to the GPU, NOT the absolute!
-            container.renderTransform.store(state.uiTransforms, index * 16);
+        // Pass the tick down to the UI children
+        super.update(delta);
 
-            if (state.fboUpdateCount < state.fboQueue.length) {
-                state.fboQueue[state.fboUpdateCount++] = container;
+        // Process UI absolute placement
+        this.updateTransform(0, 0, false);
+    }
+
+    @Override
+    public void extract3DEntities(RenderState state) {
+        // Grab a fresh snapshot for this specific scene
+        if (state.snapshotCount < state.snapshots.length) {
+            renderer.SceneSnapshot snap = state.snapshots[state.snapshotCount++];
+
+            // Link the FBO if this isn't the root window
+            snap.fboReference = (this.textureId != -1) ? this : null;
+
+            for (int i = 0; i < activeEntities.size(); i++) {
+                entity.Entity ent = activeEntities.get(i);
+                int idx = snap.entityCount++;
+                snap.meshIds[idx] = environment.RendererManager.meshIds.get(ent.id);
+                snap.textureIds[idx] = environment.RendererManager.diffuseTextureIds.get(ent.id);
+
+                // Copy the matrix directly from the entity
+                ent.mvpMatrix.store(snap.transforms, idx * 16);
             }
         }
 
-        for (int i = 0; i < container.children.size(); i++) {
-            extractContainer(container.children.get(i), state);
-        }
+        // Pass the call down to children so nested FBOs get extracted too!
+        super.extract3DEntities(state);
     }
+
 }

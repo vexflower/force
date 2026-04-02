@@ -17,6 +17,7 @@ public class Camera {
     private float lastMouseX = -1;
     private float lastMouseY = -1;
     private boolean firstMouse = true;
+    private boolean isCameraMoveable = true;
 
     public Camera() {
         updateViewMatrix();
@@ -33,6 +34,10 @@ public class Camera {
     }
 
     public void move(float deltaTime) {
+
+        if(!isCameraMoveable)
+            return;
+
         float distance = WALK_SPEED * deltaTime;
         boolean moved = false;
 
@@ -109,5 +114,10 @@ public class Camera {
 
     public void updateViewMatrix() {
         GeomMath.createViewMatrix(posX, posY, posZ, rotX, rotY, rotZ, viewMatrix);
+    }
+
+    public void setMoveable(boolean flag)
+    {
+        isCameraMoveable = flag;
     }
 }

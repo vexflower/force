@@ -73,14 +73,17 @@ public class Container extends FrameBufferObject {
     }
 
     public void updateTransform(float parentAbsX, float parentAbsY, boolean forceUpdate) {
+        // [NEW]: Lazy Init for FBO panels! If I am not the Root Window, I need an FBO.
+        if (this.textureId == -1 && hardware.Display.getContentPane() != this && this.width > 0 && this.height > 0) {
+            this.init();
+        }
+
         boolean needsUpdate = this.isDirty || forceUpdate;
 
         if (needsUpdate) {
-            // Simple float addition instead of Matrix multiplication!
             this.absoluteX = parentAbsX + localX;
             this.absoluteY = parentAbsY + localY;
 
-            // Create the final render transform for the shader
             GeomMath.createTransformationMatrix(
                     absoluteX + width / 2.0f, absoluteY + height / 2.0f, 0f, 0f, rotation,
                     (float) width * scaleX, (float) height * scaleY,
@@ -89,66 +92,32 @@ public class Container extends FrameBufferObject {
             this.isDirty = false;
         }
 
-        // Pass the absolute positions down to children
         for (int i = 0; i < children.size(); i++) {
             children.get(i).updateTransform(this.absoluteX, this.absoluteY, needsUpdate);
         }
     }
 
     public void extract3DEntities(RenderState state) {
-        if (this instanceof Scene scene) {
-            // [THE FIX]: Only extract to the global pass if this is the Main Screen (textureId == -1)
-            // If textureId > -1, it's an FBO, and it will handle its own entities privately!
-            if (this.textureId == -1) {
-                for (int i = 0; i < scene.activeEntities.size(); i++) {
-                    Entity eId = scene.activeEntities.get(i);
-                    int idx = state.entityCount++;
-                    state.meshIds[idx] = RendererManager.meshIds.get(eId.id);
-                    state.textureIds[idx] = RendererManager.diffuseTextureIds.get(eId.id);
-
-                    for (int f = 0; f < 16; f++) {
-                        state.transforms[(idx * 16) + f] = RendererManager.transforms.get((eId.id * 16) + f);
-                    }
-                }
-            }
-        }
         for (int i = 0; i < children.size(); i++) {
-            // [THE FIX]: Stop recursion! Don't dig into children if they are autonomous FBOs!
-            if (children.get(i).textureId == -1) {
-                children.get(i).extract3DEntities(state);
-            }
+            children.get(i).extract3DEntities(state);
         }
     }
 
-    // [NEW] Recursively extracts FBO Quads for the UI Pass
     public void extractUIData(RenderState state) {
-        // [NEW]: Check if it's an FBO that hasn't been initialized yet
-        if (this.textureId == -1 && this.width > 0 && this.height > 0) {
-            this.init();
-        }
-
+        // Queue this container if it IS an active FBO or textured Panel
         if (this.textureId != -1 && state.uiElementCount < 100) {
             int index = state.uiElementCount++;
             state.uiTextureIds[index] = this.textureId;
             this.renderTransform.store(state.uiTransforms, index * 16);
-
-            if (state.fboUpdateCount < state.fboQueue.length) {
-                state.fboQueue[state.fboUpdateCount++] = this;
-            }
         }
         for (int i = 0; i < children.size(); i++) {
             children.get(i).extractUIData(state);
         }
     }
 
-    /**
-     * Recursively destroys all Vulkan FBOs in this tree.
-     */
     @Override
     public void destroy() {
-        super.destroy(); // Destroys this container's FBO
-        for (int i = 0; i < children.size(); i++) {
-            children.get(i).destroy();
-        }
+        super.destroy();
+        for (int i = 0; i < children.size(); i++) children.get(i).destroy();
     }
 }

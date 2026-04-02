@@ -250,6 +250,8 @@ public class FrameBufferObject {
     }
 
     public void bind(VkCommandBuffer cmd) {
+        // ---> [THE FIX]: Push the background colors into the struct right before rendering!
+        clearValues.get(0).color().float32(0, bgR).float32(1, bgG).float32(2, bgB).float32(3, bgA);
         vkCmdBeginRenderPass(cmd, renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
         VkViewport.Buffer viewport = VkViewport.calloc(1).x(0.0f).y(0.0f).width(width).height(height).minDepth(0.0f).maxDepth(1.0f);
@@ -269,10 +271,6 @@ public class FrameBufferObject {
         this.bgG = g;
         this.bgB = b;
         this.bgA = a;
-
-        if (clearValues != null) {
-            clearValues.get(0).color().float32(0, r).float32(1, g).float32(2, b).float32(3, a);
-        }
     }
 
     public void unbind(VkCommandBuffer cmd) {

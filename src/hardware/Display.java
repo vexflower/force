@@ -362,6 +362,12 @@ public final class Display {
         if (contentPane != null) {
             contentPane.setSize(width, height);
         }
+
+        // check the root panel recursively, or not, if how many scene panels they are and then
+        // separate them so that they can be rendered every single time.
+        // so i guess every single add on every single panel should call this method to determine global,
+        // separated scenes for preparation to render
+        // add code here...
     }
 
     public static ui.Container getContentPane() {

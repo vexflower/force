@@ -6,6 +6,7 @@ import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.*;
+import shader.VKShader;
 import util.VulkanUtils;
 
 import java.nio.IntBuffer;
@@ -66,9 +67,9 @@ public class MasterRenderer {
         createImageViews();
         createRenderPass();
 
-        shader.VKShader.initBindlessHardware(Display.getDevice());
-
-        shader.VKShader.EntityShaderPipeline.pipeline = new shader.VKShader.EntityShaderPipeline(Display.getDevice(), renderPass, swapchainExtent);
+        // [THE REFACTOR]: Initialize the Ubershader directly here
+        VKShader.initBindlessHardware(Display.getDevice());
+        VKShader.initUberShader(Display.getDevice(), renderPass, swapchainExtent, "vertex", "fragment");
 
         createFramebuffers();
         createCommandPool();
@@ -278,22 +279,28 @@ public class MasterRenderer {
             subpass.pColorAttachments(colorAttachmentRef);
             subpass.pDepthStencilAttachment(depthAttachmentRef);
 
+            VkSubpassDependency.Buffer dependencies = VkSubpassDependency.calloc(2, stack);
+            // Dependency 0: Coming IN
+            dependencies.get(0).srcSubpass(VK_SUBPASS_EXTERNAL).dstSubpass(0)
+                    .srcStageMask(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
+                    .dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
+                    .srcAccessMask(VK_ACCESS_SHADER_READ_BIT)
+                    .dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
+                    .dependencyFlags(VK_DEPENDENCY_BY_REGION_BIT);
 
-            VkSubpassDependency.Buffer dependency = VkSubpassDependency.calloc(1, stack);
-            dependency.srcSubpass(VK_SUBPASS_EXTERNAL);
-            dependency.dstSubpass(0);
-            // [CHANGED] Add Depth stages to dependency
-            dependency.srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT);
-            dependency.srcAccessMask(0);
-            dependency.dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT);
-            dependency.dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+            // Dependency 1: Going OUT
+            dependencies.get(1).srcSubpass(0).dstSubpass(VK_SUBPASS_EXTERNAL)
+                    .srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT)
+                    .dstStageMask(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
+                    .srcAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
+                    .dstAccessMask(VK_ACCESS_SHADER_READ_BIT)
+                    .dependencyFlags(VK_DEPENDENCY_BY_REGION_BIT);
 
             VkRenderPassCreateInfo renderPassInfo = VkRenderPassCreateInfo.calloc(stack);
             renderPassInfo.sType(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO);
-            renderPassInfo.pAttachments(attachments); // [CHANGED] Pass the new 2-item buffer
+            renderPassInfo.pAttachments(attachments);
             renderPassInfo.pSubpasses(subpass);
-            renderPassInfo.pDependencies(dependency);
-
+            renderPassInfo.pDependencies(dependencies); // <--- Make sure this points to the new 'dependencies' variable!
             LongBuffer pRenderPass = stack.mallocLong(1);
             if (vkCreateRenderPass(device, renderPassInfo, null, pRenderPass) != VK_SUCCESS) {
                 throw new RuntimeException("Failed to create Vulkan Render Pass!");
@@ -487,50 +494,24 @@ public class MasterRenderer {
         }
 
         // ========================================================================
-        // [FUTURE FBO UPDATE PASS]
-        // If state.fboUpdateCount > 0, we will bind the specific FBOs here,
-        // draw their internal children (text, buttons), and apply a memory barrier
-        // BEFORE the main swapchain pass begins.
+        // PASS 1: RENDER ALL OFF-SCREEN FBOs
         // ========================================================================
-        for (int i = 0; i < state.fboUpdateCount; i++) {
-            ui.FrameBufferObject fbo = state.fboQueue[i];
-            fbo.bind(commandBuffers[currentFrame]);
+        for (int i = 0; i < state.snapshotCount; i++) {
+            renderer.SceneSnapshot snap = state.snapshots[i];
 
-            // [THE FIX]: Phase 5 - Draw encapsulated 3D entities natively inside their FBO!
-            if (fbo instanceof ui.scene.Scene scene && !scene.activeEntities.isEmpty()) {
-                try (MemoryStack stack = MemoryStack.stackPush()) {
-                    // Bind the pipeline and global texture phonebook inside the FBO!
-                    vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, shader.VKShader.EntityShaderPipeline.pipeline.graphicsPipeline);
-                    vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            shader.VKShader.EntityShaderPipeline.pipeline.pipelineLayout,
-                            0, stack.longs(shader.VKShader.bindlessDescriptorSet), null);
+            if (snap.fboReference != null) {
+                snap.fboReference.bind(commandBuffers[currentFrame]);
 
-                    for(int j = 0; j < scene.activeEntities.size(); j++) {
-                        entity.Entity ent = scene.activeEntities.get(j);
-                        int meshId = environment.RendererManager.meshIds.get(ent.id);
-                        int texId = environment.RendererManager.diffuseTextureIds.get(ent.id);
+                // ---> THE FIX: Bind the Ubershader AND its Phonebook BEFORE drawing FBO entities!
+                VKShader.bindUbershader(commandBuffers[currentFrame]);
 
-                        LongBuffer vertexBuffers = stack.longs(loader.MeshLoader.getVertexBuffer(meshId), loader.MeshLoader.getUvBuffer(meshId));
-                        vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, vertexBuffers, stack.longs(0, 0));
-                        vkCmdBindIndexBuffer(commandBuffers[currentFrame], loader.MeshLoader.getIndexBuffer(meshId), 0, VK_INDEX_TYPE_UINT32);
-
-                        // Pull the pre-calculated matrix straight from the Engine Room
-                        for(int f=0; f<16; f++) FBO_MATRIX_SCRATCH[f] = environment.RendererManager.transforms.get((ent.id * 16) + f);
-                        shader.VKShader.EntityShaderPipeline.loadTransformationMatrixArray(commandBuffers[currentFrame], FBO_MATRIX_SCRATCH, 0);
-
-                        vkCmdPushConstants(commandBuffers[currentFrame], shader.VKShader.EntityShaderPipeline.pipeline.pipelineLayout,
-                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 64, stack.ints(texId, 0));
-
-                        vkCmdDrawIndexed(commandBuffers[currentFrame], loader.MeshLoader.getIndexCount(meshId), 1, 0, 0, 0);
-                    }
-                }
+                drawSnapshotEntities(commandBuffers[currentFrame], snap);
+                snap.fboReference.unbind(commandBuffers[currentFrame]);
             }
-
-            fbo.unbind(commandBuffers[currentFrame]);
         }
 
         // ========================================================================
-        // MAIN SWAPCHAIN PASS (Drawing to the Screen)
+        // PASS 2: MAIN SWAPCHAIN PASS (Root 3D Entities)
         // ========================================================================
         renderArea.offset().set(0, 0);
         renderArea.extent(swapchainExtent);
@@ -539,39 +520,32 @@ public class MasterRenderer {
         renderPassInfo.framebuffer(framebuffers[imageIndex]);
 
         vkCmdBeginRenderPass(commandBuffers[currentFrame], renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        shader.VKShader.bind(shader.VKShader.EntityShaderPipeline.pipeline, commandBuffers[currentFrame]);
+        VKShader.bindUbershader(commandBuffers[currentFrame]);
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
+            // Apply Dynamic Viewport and Scissor for the main screen
+            VkViewport.Buffer viewport = VkViewport.calloc(1, stack)
+                    .x(0.0f).y(0.0f)
+                    .width(swapchainExtent.width()).height(swapchainExtent.height())
+                    .minDepth(0.0f).maxDepth(1.0f);
+            vkCmdSetViewport(commandBuffers[currentFrame], 0, viewport);
 
-            // Bind the Global Phonebook once!
-            vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    shader.VKShader.EntityShaderPipeline.pipeline.pipelineLayout,
-                    0, stack.longs(shader.VKShader.bindlessDescriptorSet), null);
+            VkRect2D.Buffer scissor = VkRect2D.calloc(1, stack)
+                    .offset(VkOffset2D.calloc(stack).set(0, 0))
+                    .extent(swapchainExtent);
+            vkCmdSetScissor(commandBuffers[currentFrame], 0, scissor);
 
-            // --------------------------------------------------------
-            // 1. DRAW 3D WORLD ENTITIES (Render Type ID: 0)
-            // --------------------------------------------------------
-            for (int i = 0; i < state.entityCount; i++) {
-                int meshId = state.meshIds[i];
-                int texId = state.textureIds[i];
-
-                LongBuffer vertexBuffers = stack.longs(loader.MeshLoader.getVertexBuffer(meshId), loader.MeshLoader.getUvBuffer(meshId));
-                vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, vertexBuffers, stack.longs(0, 0));
-                vkCmdBindIndexBuffer(commandBuffers[currentFrame], loader.MeshLoader.getIndexBuffer(meshId), 0, VK_INDEX_TYPE_UINT32);
-
-                shader.VKShader.EntityShaderPipeline.loadTransformationMatrixArray(commandBuffers[currentFrame], state.transforms, i * 16);
-
-                // [THE FIX]: Push texId and renderType = 0
-                vkCmdPushConstants(commandBuffers[currentFrame], shader.VKShader.EntityShaderPipeline.pipeline.pipelineLayout,
-                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 64, stack.ints(texId, 0));
-
-                vkCmdDrawIndexed(commandBuffers[currentFrame], loader.MeshLoader.getIndexCount(meshId), 1, 0, 0, 0);
+            // Find the Root Scene snapshot (the one with NO FBO reference) and draw it!
+            for (int i = 0; i < state.snapshotCount; i++) {
+                if (state.snapshots[i].fboReference == null) {
+                    drawSnapshotEntities(commandBuffers[currentFrame], state.snapshots[i]);
+                    break;
+                }
             }
 
-            // --------------------------------------------------------
-            // 2. DRAW 2D UI PANELS (Render Type ID: 1)
-            // --------------------------------------------------------
+            // ========================================================================
+            // PASS 3: STACKED UI PANELS
+            // ========================================================================
             if (state.uiElementCount > 0) {
                 int squareMeshId = model.Mesh.SQUARE.vaoId;
                 LongBuffer vertexBuffers = stack.longs(loader.MeshLoader.getVertexBuffer(squareMeshId), loader.MeshLoader.getUvBuffer(squareMeshId));
@@ -580,21 +554,11 @@ public class MasterRenderer {
 
                 for (int i = 0; i < state.uiElementCount; i++) {
                     int texId = state.uiTextureIds[i];
-
-                    shader.VKShader.EntityShaderPipeline.loadTransformationMatrixArray(commandBuffers[currentFrame], state.uiTransforms, i * 16);
-
-                    // [THE FIX]: Push texId and renderType = 1
-                    vkCmdPushConstants(commandBuffers[currentFrame], shader.VKShader.EntityShaderPipeline.pipeline.pipelineLayout,
-                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 64, stack.ints(texId, 1));
-
-                    // Push current Screen Dimensions for the UI pixel division
-                    vkCmdPushConstants(commandBuffers[currentFrame], shader.VKShader.EntityShaderPipeline.pipeline.pipelineLayout,
-                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 72, stack.floats((float)Display.getWidth(), (float)Display.getHeight()));
-
+                    VKShader.pushUIState(commandBuffers[currentFrame], state.uiTransforms, i * 16, texId, (float)Display.getWidth(), (float)Display.getHeight());
                     vkCmdDrawIndexed(commandBuffers[currentFrame], loader.MeshLoader.getIndexCount(squareMeshId), 1, 0, 0, 0);
                 }
             }
-        }
+        } // The stack automatically pops here, freeing the viewport and scissor memory
 
         vkCmdEndRenderPass(commandBuffers[currentFrame]);
 
@@ -619,6 +583,22 @@ public class MasterRenderer {
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
+    private static void drawSnapshotEntities(VkCommandBuffer cmd, renderer.SceneSnapshot snap) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            for (int i = 0; i < snap.entityCount; i++) {
+                int meshId = snap.meshIds[i];
+                int texId = snap.textureIds[i];
+
+                LongBuffer vertexBuffers = stack.longs(loader.MeshLoader.getVertexBuffer(meshId), loader.MeshLoader.getUvBuffer(meshId));
+                vkCmdBindVertexBuffers(cmd, 0, vertexBuffers, stack.longs(0, 0));
+                vkCmdBindIndexBuffer(cmd, loader.MeshLoader.getIndexBuffer(meshId), 0, VK_INDEX_TYPE_UINT32);
+
+                VKShader.pushEntityState(cmd, snap.transforms, i * 16, texId);
+                vkCmdDrawIndexed(cmd, loader.MeshLoader.getIndexCount(meshId), 1, 0, 0, 0);
+            }
+        }
+    }
+
     private static void cleanupSwapchain() {
         VkDevice device = Display.getDevice();
 
@@ -627,10 +607,11 @@ public class MasterRenderer {
             vkDestroyFramebuffer(device, framebuffer, null);
         }
 
-        if (shader.VKShader.EntityShaderPipeline.pipeline != null) {
-            vkDestroyPipeline(device, shader.VKShader.EntityShaderPipeline.pipeline.graphicsPipeline, null);
-            vkDestroyPipelineLayout(device, shader.VKShader.EntityShaderPipeline.pipeline.pipelineLayout, null);
-            shader.VKShader.EntityShaderPipeline.pipeline = null;
+        if (VKShader.ubershaderPipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device, VKShader.ubershaderPipeline, null);
+            vkDestroyPipelineLayout(device, VKShader.pipelineLayout, null);
+            VKShader.ubershaderPipeline = VK_NULL_HANDLE;
+            VKShader.pipelineLayout = VK_NULL_HANDLE;
         }
 
         if (renderPass != VK_NULL_HANDLE) {
@@ -703,7 +684,6 @@ public class MasterRenderer {
             }
         }
 
-        shader.VKShader.EntityShaderPipeline.pipeline = new shader.VKShader.EntityShaderPipeline(device, renderPass, swapchainExtent);
         createFramebuffers();
 
         if (renderPassInfo != null) {

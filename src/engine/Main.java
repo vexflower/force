@@ -21,13 +21,15 @@ public class Main {
         scene.setBackgroundColor(0, 0, 0, 0);
         Display.setContentPane(scene);
 
-        Scene3D scene2 = new Scene3D(1280, 720);
-        scene2.isViewportPanel = true;
-        scene2.setBackgroundColor(.2f, .2f, .2f, 1f);
+        Scene3D scene2 = new Scene3D(400, 400);
+        scene2.setBackgroundColor(.2f, .2f, .9f, .4f);
+        // ---> ADD THIS: Move the FBO panel to the right side of the screen!
+        scene2.setPosition(400, 50);
 
         Entity brat = new Entity(Mesh.CUBE, TextureLoader.loadTexture("images/brat.png"));
         brat.setPosition(0, 0,-150);
         brat.setRotation(0, 200f, 0);
+        brat.scale = 10f;
         scene2.addEntity(brat);
 
         scene.add(scene2);
@@ -37,6 +39,7 @@ public class Main {
         cam.setPosition(0f, 20f, 50f); // Step back to look at the fox
         scene.setCamera(cam);
         scene2.setCamera(cam);
+
         scene2.updatesCamera = false;
 
         // 2. High-Level Entity Creation
@@ -53,6 +56,8 @@ public class Main {
         myPanel.setBackgroundColor(0.8f, 0.1f, 0.1f, 0.7f);
         myPanel.setPosition(50, 50);
         scene.add(myPanel);
+
+        //Display.setContentPane(scene2);
 
         // Run the engine
         GameEngine.start();

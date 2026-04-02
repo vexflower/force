@@ -1,14 +1,12 @@
 package engine;
 
-import lang.Mat4;
 import loader.MeshLoader;
 import loader.TextureRegistry;
-import ui.scene.Scene;
-import hardware.Display;
-import hardware.Keyboard;
-import renderer.MasterRenderer;
 import renderer.RenderState;
 import renderer.SharedState;
+import ui.scene.Scene;
+import hardware.Display;
+import renderer.MasterRenderer;
 
 public class GameEngine {
 
@@ -66,12 +64,9 @@ public class GameEngine {
                 ui.Container root = Display.getContentPane();
                 if (root != null) {
                     root.update(deltaInSeconds); // Ticks the whole tree
-                    root.updateTransform(0,  0, root.isDirty); // Cascades the math
 
                     RenderState backBuffer = sharedState.getBackBuffer();
-                    backBuffer.entityCount = 0;
-                    backBuffer.uiElementCount = 0;
-                    backBuffer.fboUpdateCount = 0;
+                    backBuffer.clear(); // <-- The new, clean reset!
 
                     // Harvest all data from the tree!
                     root.extract3DEntities(backBuffer);
