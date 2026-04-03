@@ -7,15 +7,4 @@ public class Scene2D extends Scene
 
     }
 
-    @Override
-    public void init()
-    {
-
-    }
-
-    @Override
-    public void update(float delta)
-    {
-
-    }
 }

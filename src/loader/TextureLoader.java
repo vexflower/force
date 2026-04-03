@@ -1,11 +1,11 @@
 package loader;
 
-import hardware.Display;
+import hardware.VulkanContext;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.*;
-import util.VulkanUtils;
+import util.VK;
 
 import java.nio.ByteBuffer;
 
@@ -48,18 +48,18 @@ public class TextureLoader {
 
     public static int uploadToGPU(ByteBuffer decodedPixels, int width, int height) {
         long imageSize = (long) width * height * 4; // 4 bytes per pixel (RGBA)
-        VkDevice device = Display.getDevice(); // Get device directly from your Display class
+        VkDevice device = VulkanContext.getDevice(); // Get device directly from your Display class
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
 
             // ==========================================
             // 1. CREATE AND FILL THE STAGING BUFFER
             // ==========================================
-            long stagingBuffer = VulkanUtils.createBuffer(
+            long stagingBuffer = VK.createBuffer(
                     imageSize,
                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT
             );
-            long stagingBufferMemory = VulkanUtils.allocateBufferMemory(
+            long stagingBufferMemory = VK.allocateBufferMemory(
                     stagingBuffer,
                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
             );
@@ -72,14 +72,14 @@ public class TextureLoader {
             // ==========================================
             // 2. CREATE THE VULKAN IMAGE (DEVICE LOCAL)
             // ==========================================
-            long vkImage = VulkanUtils.createImage(
+            long vkImage = VK.createImage(
                     width, height,
                     VK_FORMAT_R8G8B8A8_SRGB,
                     VK_IMAGE_TILING_OPTIMAL,
                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
             );
 
-            long vkImageMemory = VulkanUtils.allocateImageMemory(
+            long vkImageMemory = VK.allocateImageMemory(
                     vkImage,
                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
             );
@@ -89,25 +89,25 @@ public class TextureLoader {
             // 3. TRANSITIONS AND COPYING
             // ==========================================
             // Pass the command pool down so VulkanUtils can allocate the commands
-            VkCommandBuffer commandBuffer = VulkanUtils.beginSingleTimeCommands();
+            VkCommandBuffer commandBuffer = VK.beginSingleTimeCommands();
 
-            VulkanUtils.transitionImageLayout(
+            VK.transitionImageLayout(
                     commandBuffer, vkImage,
                     VK_FORMAT_R8G8B8A8_SRGB,
                     VK_IMAGE_LAYOUT_UNDEFINED,
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
             );
 
-            VulkanUtils.copyBufferToImage(commandBuffer, stagingBuffer, vkImage, width, height);
+            VK.copyBufferToImage(commandBuffer, stagingBuffer, vkImage, width, height);
 
-            VulkanUtils.transitionImageLayout(
+            VK.transitionImageLayout(
                     commandBuffer, vkImage,
                     VK_FORMAT_R8G8B8A8_SRGB,
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
             );
 
-            VulkanUtils.endSingleTimeCommands(commandBuffer);
+            VK.endSingleTimeCommands(commandBuffer);
 
             // ==========================================
             // 4. CLEANUP RAM & CREATE VIEWS
@@ -115,8 +115,8 @@ public class TextureLoader {
             vkDestroyBuffer(device, stagingBuffer, null);
             vkFreeMemory(device, stagingBufferMemory, null);
 
-            long imageView = VulkanUtils.createImageView(vkImage, VK_FORMAT_R8G8B8A8_SRGB);
-            long sampler = VulkanUtils.createTextureSampler();
+            long imageView = VK.createImageView(vkImage, VK_FORMAT_R8G8B8A8_SRGB);
+            long sampler = VK.createTextureSampler();
 
             // Store in our Java registry to get the ID
             int textureId = TextureRegistry.add(vkImage, vkImageMemory, imageView, sampler);

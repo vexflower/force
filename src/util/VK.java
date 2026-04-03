@@ -1,27 +1,70 @@
 package util;
 
-import hardware.Display;
+import hardware.VulkanContext;
+import hardware.Window;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.*;
 import renderer.MasterRenderer;
 
+import java.nio.ByteBuffer;
+import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 
 import static org.lwjgl.system.MemoryStack.stackPush;
+import static org.lwjgl.vulkan.KHRSurface.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+import static org.lwjgl.vulkan.KHRSurface.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+import static org.lwjgl.vulkan.KHRSwapchain.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+import static org.lwjgl.vulkan.KHRSwapchain.VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+import static org.lwjgl.vulkan.KHRSwapchain.VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
 import static org.lwjgl.vulkan.VK10.*;
 
 /**
  * Boilerplate wrapper for Vulkan memory and image operations.
  */
-public class VulkanUtils {
+public class VK
+{
+
+    public static IntBuffer allocInt(int size)
+    {
+        return MemoryUtil.memAllocInt(1);
+    }
+
+    public static FloatBuffer allocFloat(float size)
+    {
+        return MemoryUtil.memAllocFloat(1);
+    }
+
+    public static PointerBuffer allocPointer(int size)
+    {
+        return MemoryUtil.memAllocPointer(1);
+    }
+
+    public static LongBuffer allocLong(int size)
+    {
+        return MemoryUtil.memAllocLong(1);
+    }
+
+    public static ByteBuffer allocByte(int size)
+    {
+        return MemoryUtil.memAlloc(1);
+    }
+
+
+    public static VkCommandBufferBeginInfo createBeginInfo()
+    {
+        return VkCommandBufferBeginInfo.calloc().sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO);
+    }
 
     /**
      * Finds the exact right type of RAM (e.g., CPU-visible vs GPU-local) on your specific hardware.
      */
     public static int findMemoryType(int typeFilter, int properties) {
         VkPhysicalDeviceMemoryProperties memProperties = VkPhysicalDeviceMemoryProperties.calloc();
-        vkGetPhysicalDeviceMemoryProperties(Display.getPhysicalDevice(), memProperties);
+        // ---> THE FIX: Use VulkanContext
+        vkGetPhysicalDeviceMemoryProperties(VulkanContext.getPhysicalDevice(), memProperties);
 
         for (int i = 0; i < memProperties.memoryTypeCount(); i++) {
             if ((typeFilter & (1 << i)) != 0 && (memProperties.memoryTypes(i).propertyFlags() & properties) == properties) {
@@ -42,7 +85,8 @@ public class VulkanUtils {
             bufferInfo.sharingMode(VK_SHARING_MODE_EXCLUSIVE);
 
             LongBuffer pBuffer = stack.mallocLong(1);
-            if (vkCreateBuffer(Display.getDevice(), bufferInfo, null, pBuffer) != VK_SUCCESS) {
+            // ---> THE FIX: Use VulkanContext
+            if (vkCreateBuffer(VulkanContext.getDevice(), bufferInfo, null, pBuffer) != VK_SUCCESS) {
                 throw new RuntimeException("Failed to create Vulkan Buffer!");
             }
             return pBuffer.get(0);
@@ -52,7 +96,7 @@ public class VulkanUtils {
     public static long allocateBufferMemory(long buffer, int properties) {
         try (MemoryStack stack = stackPush()) {
             VkMemoryRequirements memRequirements = VkMemoryRequirements.calloc(stack);
-            vkGetBufferMemoryRequirements(Display.getDevice(), buffer, memRequirements);
+            vkGetBufferMemoryRequirements(VulkanContext.getDevice(), buffer, memRequirements);
 
             VkMemoryAllocateInfo allocInfo = VkMemoryAllocateInfo.calloc(stack);
             allocInfo.sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
@@ -60,10 +104,10 @@ public class VulkanUtils {
             allocInfo.memoryTypeIndex(findMemoryType(memRequirements.memoryTypeBits(), properties));
 
             LongBuffer pBufferMemory = stack.mallocLong(1);
-            if (vkAllocateMemory(Display.getDevice(), allocInfo, null, pBufferMemory) != VK_SUCCESS) {
+            if (vkAllocateMemory(VulkanContext.getDevice(), allocInfo, null, pBufferMemory) != VK_SUCCESS) {
                 throw new RuntimeException("Failed to allocate Buffer Memory!");
             }
-            vkBindBufferMemory(Display.getDevice(), buffer, pBufferMemory.get(0), 0);
+            vkBindBufferMemory(VulkanContext.getDevice(), buffer, pBufferMemory.get(0), 0);
             return pBufferMemory.get(0);
         }
     }
@@ -74,7 +118,7 @@ public class VulkanUtils {
             imageInfo.sType(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO);
             imageInfo.imageType(VK_IMAGE_TYPE_2D);
             imageInfo.extent().width(width).height(height).depth(1);
-            imageInfo.mipLevels(1); // Set higher if using Mipmapping
+            imageInfo.mipLevels(1);
             imageInfo.arrayLayers(1);
             imageInfo.format(format);
             imageInfo.tiling(tiling);
@@ -84,7 +128,7 @@ public class VulkanUtils {
             imageInfo.sharingMode(VK_SHARING_MODE_EXCLUSIVE);
 
             LongBuffer pImage = stack.mallocLong(1);
-            if (vkCreateImage(Display.getDevice(), imageInfo, null, pImage) != VK_SUCCESS) {
+            if (vkCreateImage(VulkanContext.getDevice(), imageInfo, null, pImage) != VK_SUCCESS) {
                 throw new RuntimeException("Failed to create Vulkan Image!");
             }
             return pImage.get(0);
@@ -94,7 +138,7 @@ public class VulkanUtils {
     public static long allocateImageMemory(long image, int properties) {
         try (MemoryStack stack = stackPush()) {
             VkMemoryRequirements memRequirements = VkMemoryRequirements.calloc(stack);
-            vkGetImageMemoryRequirements(Display.getDevice(), image, memRequirements);
+            vkGetImageMemoryRequirements(VulkanContext.getDevice(), image, memRequirements);
 
             VkMemoryAllocateInfo allocInfo = VkMemoryAllocateInfo.calloc(stack);
             allocInfo.sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
@@ -102,7 +146,7 @@ public class VulkanUtils {
             allocInfo.memoryTypeIndex(findMemoryType(memRequirements.memoryTypeBits(), properties));
 
             LongBuffer pImageMemory = stack.mallocLong(1);
-            if (vkAllocateMemory(Display.getDevice(), allocInfo, null, pImageMemory) != VK_SUCCESS) {
+            if (vkAllocateMemory(VulkanContext.getDevice(), allocInfo, null, pImageMemory) != VK_SUCCESS) {
                 throw new RuntimeException("Failed to allocate Image Memory!");
             }
             return pImageMemory.get(0);
@@ -116,14 +160,18 @@ public class VulkanUtils {
             viewInfo.image(image);
             viewInfo.viewType(VK_IMAGE_VIEW_TYPE_2D);
             viewInfo.format(format);
-            viewInfo.subresourceRange().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT);
+
+            // ---> THE FIX: Dynamically assign the aspect mask!
+            int aspectFlags = (format == VK_FORMAT_D32_SFLOAT) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+
+            viewInfo.subresourceRange().aspectMask(aspectFlags);
             viewInfo.subresourceRange().baseMipLevel(0);
             viewInfo.subresourceRange().levelCount(1);
             viewInfo.subresourceRange().baseArrayLayer(0);
             viewInfo.subresourceRange().layerCount(1);
 
             LongBuffer pImageView = stack.mallocLong(1);
-            if (vkCreateImageView(Display.getDevice(), viewInfo, null, pImageView) != VK_SUCCESS) {
+            if (vkCreateImageView(VulkanContext.getDevice(), viewInfo, null, pImageView) != VK_SUCCESS) {
                 throw new RuntimeException("Failed to create texture image view!");
             }
             return pImageView.get(0);
@@ -139,11 +187,8 @@ public class VulkanUtils {
             samplerInfo.addressModeU(VK_SAMPLER_ADDRESS_MODE_REPEAT);
             samplerInfo.addressModeV(VK_SAMPLER_ADDRESS_MODE_REPEAT);
             samplerInfo.addressModeW(VK_SAMPLER_ADDRESS_MODE_REPEAT);
-
-            // Disable anisotropic filtering to save Intel UHD performance
             samplerInfo.anisotropyEnable(false);
             samplerInfo.maxAnisotropy(1.0f);
-
             samplerInfo.borderColor(VK_BORDER_COLOR_INT_OPAQUE_BLACK);
             samplerInfo.unnormalizedCoordinates(false);
             samplerInfo.compareEnable(false);
@@ -151,7 +196,7 @@ public class VulkanUtils {
             samplerInfo.mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR);
 
             LongBuffer pSampler = stack.mallocLong(1);
-            if (vkCreateSampler(Display.getDevice(), samplerInfo, null, pSampler) != VK_SUCCESS) {
+            if (vkCreateSampler(VulkanContext.getDevice(), samplerInfo, null, pSampler) != VK_SUCCESS) {
                 throw new RuntimeException("Failed to create texture sampler!");
             }
             return pSampler.get(0);
@@ -170,9 +215,9 @@ public class VulkanUtils {
             allocInfo.commandBufferCount(1);
 
             PointerBuffer pCommandBuffer = stack.mallocPointer(1);
-            vkAllocateCommandBuffers(Display.getDevice(), allocInfo, pCommandBuffer);
+            vkAllocateCommandBuffers(VulkanContext.getDevice(), allocInfo, pCommandBuffer);
 
-            VkCommandBuffer commandBuffer = new VkCommandBuffer(pCommandBuffer.get(0), Display.getDevice());
+            VkCommandBuffer commandBuffer = new VkCommandBuffer(pCommandBuffer.get(0), VulkanContext.getDevice());
 
             VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack);
             beginInfo.sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO);
@@ -191,10 +236,10 @@ public class VulkanUtils {
             submitInfo.sType(VK_STRUCTURE_TYPE_SUBMIT_INFO);
             submitInfo.pCommandBuffers(stack.pointers(commandBuffer));
 
-            vkQueueSubmit(Display.getGraphicsQueue(), submitInfo, VK_NULL_HANDLE);
-            vkQueueWaitIdle(Display.getGraphicsQueue());
+            vkQueueSubmit(VulkanContext.getGraphicsQueue(), submitInfo, VK_NULL_HANDLE);
+            vkQueueWaitIdle(VulkanContext.getGraphicsQueue());
 
-            vkFreeCommandBuffers(Display.getDevice(), MasterRenderer.getCommandPool(), commandBuffer);
+            vkFreeCommandBuffers(VulkanContext.getDevice(), MasterRenderer.getCommandPool(), commandBuffer);
         }
     }
 
@@ -249,5 +294,137 @@ public class VulkanUtils {
 
             vkCmdCopyBufferToImage(cmd, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, region);
         }
+    }
+
+    public static VkClearValue.Buffer createClearValues()
+    {
+        VkClearValue.Buffer value = VkClearValue.calloc(2);
+
+        // Color Clear
+        value.get(0).color()
+                .float32(0, 1)
+                .float32(1, 1)
+                .float32(2, 1)
+                .float32(3, 1);
+
+        // Depth Clear
+        value.get(1).depthStencil()
+                .depth(1.0f)
+                .stencil(0);
+
+        return value;
+    }
+
+    public static VkRect2D createRenderArea()
+    {
+        return VkRect2D.calloc();
+    }
+
+    public static VkRenderPassBeginInfo createRenderPassInfo(long renderPass, VkClearValue.Buffer clearValues)
+    {
+        return VkRenderPassBeginInfo.calloc()
+                                    .sType(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO)
+                                    .renderPass(renderPass)
+                                    .pClearValues(clearValues);
+    }
+
+    public static VkSubmitInfo createSubmitInfo(IntBuffer mask)
+    {
+        return  VkSubmitInfo.calloc()
+                .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                .waitSemaphoreCount(1)
+                .pWaitDstStageMask(mask);
+    }
+
+    public static VkPresentInfoKHR createPresentInfo(LongBuffer pSwapchains, IntBuffer pImageIndex)
+    {
+        return VkPresentInfoKHR.calloc()
+                .sType(VK_STRUCTURE_TYPE_PRESENT_INFO_KHR)
+                .swapchainCount(1)
+                .pSwapchains(pSwapchains)
+                .pImageIndices(pImageIndex);
+    }
+
+    public static VkSwapchainCreateInfoKHR createCreateInfo(MemoryStack stack, long surface, int swapchainImageFormat, VkExtent2D swapchainExtent, int presentMode, VkSurfaceCapabilitiesKHR capabilities, int imageCount)
+    {
+        return  VkSwapchainCreateInfoKHR.calloc(stack).sType(VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR)
+         .surface(surface)
+         .minImageCount(imageCount)
+         .imageFormat(swapchainImageFormat)
+         .imageColorSpace(VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+         .imageExtent(swapchainExtent)
+         .imageArrayLayers(1)
+         .imageUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
+         .presentMode(presentMode)
+         .preTransform(capabilities.currentTransform())
+         .compositeAlpha(VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
+         .clipped(true)
+         .oldSwapchain(VK_NULL_HANDLE);
+    }
+
+    public static void modifyDependencies(MemoryStack stack, VkSubpassDependency.Buffer dependencies)
+    {
+        // Dependency 0: Coming IN
+        dependencies.get(0)
+                    .srcSubpass(VK_SUBPASS_EXTERNAL).dstSubpass(0)
+                    .srcStageMask(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
+                    .dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
+                    .srcAccessMask(VK_ACCESS_SHADER_READ_BIT)
+                    .dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
+                    .dependencyFlags(VK_DEPENDENCY_BY_REGION_BIT);
+
+        // Dependency 1: Going OUT
+        dependencies.get(1)
+                    .srcSubpass(0)
+                    .dstSubpass(VK_SUBPASS_EXTERNAL)
+                    .srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT)
+                    .dstStageMask(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
+                    .srcAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
+                    .dstAccessMask(VK_ACCESS_SHADER_READ_BIT)
+                    .dependencyFlags(VK_DEPENDENCY_BY_REGION_BIT);
+
+    }
+
+    public static void modifyBufferAttachments(VkAttachmentDescription.Buffer attachments, int swapchainImageFormat)
+    {
+
+        // 0: Color Attachment
+        attachments.get(0).format(swapchainImageFormat).samples(VK_SAMPLE_COUNT_1_BIT)
+                .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR).storeOp(VK_ATTACHMENT_STORE_OP_STORE)
+                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED).finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+        // 1: Depth Attachment
+        attachments.get(1).format(VK_FORMAT_D32_SFLOAT).samples(VK_SAMPLE_COUNT_1_BIT)
+                .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR).storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE) // Don't need to save depth after rendering
+                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED).finalLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+    }
+
+    public static VkAttachmentDescription.Buffer createColorAttachmentBuffer(MemoryStack stack, int format)
+    {
+        return VkAttachmentDescription.calloc(1, stack)
+        .format(format)
+        .samples(VK_SAMPLE_COUNT_1_BIT)
+        .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
+        .storeOp(VK_ATTACHMENT_STORE_OP_STORE)
+        .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+        .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+        .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
+        .finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    }
+
+    public static VkImageCreateInfo createImageInfo(MemoryStack stack, int width, int height, int format, int usage) {
+        return VkImageCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO)
+                .imageType(VK_IMAGE_TYPE_2D)
+                .extent(VkExtent3D.calloc(stack).set(width, height, 1))
+                .mipLevels(1).arrayLayers(1)
+                .format(format)
+                .tiling(VK_IMAGE_TILING_OPTIMAL)
+                .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
+                .usage(usage)
+                .samples(VK_SAMPLE_COUNT_1_BIT)
+                .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
     }
 }

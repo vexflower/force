@@ -1,6 +1,6 @@
 package loader;
 
-import hardware.Display;
+import hardware.VulkanContext;
 import org.lwjgl.vulkan.VkDevice;
 
 import static org.lwjgl.vulkan.VK10.*;
@@ -57,7 +57,7 @@ public class TextureRegistry {
      * Called during engine shutdown to prevent memory leaks.
      */
     public static void destroy() {
-        VkDevice device = hardware.Display.getDevice();
+        VkDevice device = VulkanContext.getDevice();
         // Assuming your arrays are named this based on the add() method
         for (int i = 0; i < count; i++) {
             vkDestroySampler(device, samplers[i], null);

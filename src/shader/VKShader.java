@@ -1,6 +1,6 @@
 package shader;
 
-import hardware.Display;
+import hardware.VulkanContext;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.*;
@@ -94,7 +94,7 @@ public final class VKShader {
                     .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(1)
                     .pImageInfo(imageInfo);
 
-            vkUpdateDescriptorSets(Display.getDevice(), descriptorWrite, null);
+            vkUpdateDescriptorSets(VulkanContext.getDevice(), descriptorWrite, null);
         }
     }
 
@@ -131,7 +131,7 @@ public final class VKShader {
             VkPipelineRasterizationStateCreateInfo rasterizer = VkPipelineRasterizationStateCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO)
                     .polygonMode(VK_POLYGON_MODE_FILL).lineWidth(1.0f)
-                    .cullMode(VK_CULL_MODE_NONE).frontFace(VK_FRONT_FACE_CLOCKWISE);
+                    .cullMode(VK_CULL_MODE_BACK_BIT).frontFace(VK_FRONT_FACE_CLOCKWISE);
 
             VkPipelineDepthStencilStateCreateInfo depthStencil = VkPipelineDepthStencilStateCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO)

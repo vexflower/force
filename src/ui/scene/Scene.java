@@ -47,48 +47,27 @@ public class Scene extends Container {
     }
 
     @Override
-    public void update(float delta) {
-        int dw = hardware.Display.getWidth();
-        int dh = hardware.Display.getHeight();
-
-        // If this is the Main Screen, constantly check for window resizes!
-        if (this.textureId == -1 && (dw != currentWidth || dh != currentHeight)) {
-            currentWidth = dw;
-            currentHeight = dh;
-            this.width = dw;
-            this.height = dh;
-            if (contentPane != null) contentPane.setSize(dw, dh);
-            onResize(dw, dh); // Recalculates the Matrix!
-        }
-
-        // Pass the tick down to the UI children
-        super.update(delta);
-
-        // Process UI absolute placement
-        this.updateTransform(0, 0, false);
-    }
-
-    @Override
-    public void extract3DEntities(RenderState state) {
-        // Grab a fresh snapshot for this specific scene
+    public void extract3DEntities(renderer.RenderState state) {
         if (state.snapshotCount < state.snapshots.length) {
             renderer.SceneSnapshot snap = state.snapshots[state.snapshotCount++];
 
-            // Link the FBO if this isn't the root window
-            snap.fboReference = (this.textureId != -1) ? this : null;
+            // Pure data transfer. The Renderer will handle the actual VRAM.
+            snap.containerId = this.id;
+            snap.isOffscreen = this.requiresOffscreen;
+            snap.width = this.width;
+            snap.height = this.height;
+            snap.bgR = this.bgR; snap.bgG = this.bgG; snap.bgB = this.bgB; snap.bgA = this.bgA;
 
             for (int i = 0; i < activeEntities.size(); i++) {
+                if (snap.entityCount >= snap.meshIds.length) break;
+
                 entity.Entity ent = activeEntities.get(i);
                 int idx = snap.entityCount++;
                 snap.meshIds[idx] = environment.RendererManager.meshIds.get(ent.id);
                 snap.textureIds[idx] = environment.RendererManager.diffuseTextureIds.get(ent.id);
-
-                // Copy the matrix directly from the entity
                 ent.mvpMatrix.store(snap.transforms, idx * 16);
             }
         }
-
-        // Pass the call down to children so nested FBOs get extracted too!
         super.extract3DEntities(state);
     }
 

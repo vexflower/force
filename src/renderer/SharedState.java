@@ -1,38 +1,43 @@
 package renderer;
 
-import java.util.concurrent.atomic.AtomicReference;
-
 public class SharedState {
 
-    // Pre-allocate both buffers. Zero GC forever.
-    private final RenderState stateA = new RenderState();
-    private final RenderState stateB = new RenderState();
+    // Triple Buffering: Zero GC forever.
+    private final RenderState[] states = new RenderState[] {
+            new RenderState(), new RenderState(), new RenderState()
+    };
 
-    // The atomic pointer. Defaults to stateA.
-    private final AtomicReference<RenderState> frontBuffer = new AtomicReference<>(stateA);
+    private int readIndex = 0;
+    private int writeIndex = 1;
+    private int readyIndex = -1;
 
-    /**
-     * Called by the RENDER THREAD.
-     * Grabs whichever state is currently "live". Never blocks.
-     */
-    public RenderState getFrontBuffer() {
-        return frontBuffer.get();
+    public synchronized RenderState getFrontBuffer() {
+        // ONLY swap if the Logic Thread has flagged a new frame as ready!
+        if (readyIndex != -1) {
+            readIndex = readyIndex;
+            readyIndex = -1; // <--- THE FIX: Mark the buffer as fully consumed!
+        }
+        return states[readIndex];
     }
 
-    /**
-     * Called by the LOGIC THREAD.
-     * Grabs whichever state is NOT currently being read by the GPU.
-     */
-    public RenderState getBackBuffer() {
-        return frontBuffer.get() == stateA ? stateB : stateA;
+    public synchronized RenderState getBackBuffer() {
+        return states[writeIndex];
     }
 
-    /**
-     * Called by the LOGIC THREAD at the end of a tick.
-     * Instantly swaps the pointers. The next time the Render Thread loops,
-     * it will seamlessly pick up the new state.
-     */
-    public void swap() {
-        frontBuffer.set(getBackBuffer());
+    public synchronized void swap() {
+        int oldReady = readyIndex;
+        readyIndex = writeIndex;
+
+        if (oldReady != -1) {
+            writeIndex = oldReady;
+        } else {
+            // Find a free buffer that is NOT the readIndex AND NOT the readyIndex
+            for (int i = 0; i < 3; i++) {
+                if (i != readIndex && i != readyIndex) {
+                    writeIndex = i;
+                    break;
+                }
+            }
+        }
     }
 }

@@ -1,6 +1,6 @@
 package loader;
 
-import hardware.Display;
+import hardware.VulkanContext;
 import model.Mesh;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.assimp.AIFace;
@@ -12,7 +12,7 @@ import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.*;
 import util.FloatList;
 import util.IntList;
-import util.VulkanUtils;
+import util.VK;
 
 import java.io.File;
 import java.io.IOException;
@@ -88,12 +88,12 @@ public final class MeshLoader {
      */
     private static long[] createBufferFromFloatArray(float[] data, int usageFlag) {
         long bufferSize = (long) data.length * 4; // 4 bytes per float
-        VkDevice device = Display.getDevice();
+        VkDevice device = VulkanContext.getDevice();
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             // STEP A: Create the CPU-Visible Staging Buffer
-            long stagingBuffer = VulkanUtils.createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-            long stagingMemory = VulkanUtils.allocateBufferMemory(stagingBuffer, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            long stagingBuffer = VK.createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+            long stagingMemory = VK.allocateBufferMemory(stagingBuffer, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
             // STEP B: Map the memory and copy the Java float[] into the C-Memory
             PointerBuffer pData = stack.mallocPointer(1);
@@ -103,8 +103,8 @@ public final class MeshLoader {
             vkUnmapMemory(device, stagingMemory);
 
             // STEP C: Create the ultra-fast GPU-Only Buffer
-            long gpuBuffer = VulkanUtils.createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usageFlag);
-            long gpuMemory = VulkanUtils.allocateBufferMemory(gpuBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            long gpuBuffer = VK.createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usageFlag);
+            long gpuMemory = VK.allocateBufferMemory(gpuBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
             // STEP D: Instruct the GPU to copy from Staging to Device_Local
             copyBuffer(stagingBuffer, gpuBuffer, bufferSize);
@@ -123,11 +123,11 @@ public final class MeshLoader {
      */
     private static long[] createBufferFromIntArray(int[] data, int usageFlag) {
         long bufferSize = (long) data.length * 4; // 4 bytes per int
-        VkDevice device = Display.getDevice();
+        VkDevice device = VulkanContext.getDevice();
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            long stagingBuffer = VulkanUtils.createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-            long stagingMemory = VulkanUtils.allocateBufferMemory(stagingBuffer, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            long stagingBuffer = VK.createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+            long stagingMemory = VK.allocateBufferMemory(stagingBuffer, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
             PointerBuffer pData = stack.mallocPointer(1);
             vkMapMemory(device, stagingMemory, 0, bufferSize, 0, pData);
@@ -135,8 +135,8 @@ public final class MeshLoader {
             intBuffer.put(data);
             vkUnmapMemory(device, stagingMemory);
 
-            long gpuBuffer = VulkanUtils.createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usageFlag);
-            long gpuMemory = VulkanUtils.allocateBufferMemory(gpuBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            long gpuBuffer = VK.createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usageFlag);
+            long gpuMemory = VK.allocateBufferMemory(gpuBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
             copyBuffer(stagingBuffer, gpuBuffer, bufferSize);
 
@@ -203,7 +203,7 @@ public final class MeshLoader {
      */
     private static void copyBuffer(long srcBuffer, long dstBuffer, long size) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkCommandBuffer commandBuffer = VulkanUtils.beginSingleTimeCommands();
+            VkCommandBuffer commandBuffer = VK.beginSingleTimeCommands();
 
             VkBufferCopy.Buffer copyRegion = VkBufferCopy.calloc(1, stack);
             copyRegion.srcOffset(0);
@@ -212,7 +212,7 @@ public final class MeshLoader {
 
             vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, copyRegion);
 
-            VulkanUtils.endSingleTimeCommands(commandBuffer);
+            VK.endSingleTimeCommands(commandBuffer);
         }
     }
 
@@ -242,7 +242,7 @@ public final class MeshLoader {
     }
 
     public static void destroy() {
-        VkDevice device = hardware.Display.getDevice();
+        VkDevice device = hardware.VulkanContext.getDevice();
         for (int i = 0; i < meshCount; i++) {
             vkDestroyBuffer(device, vertexBuffers[i], null);
             vkFreeMemory(device, vertexMemories[i], null);

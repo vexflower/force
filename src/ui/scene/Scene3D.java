@@ -1,5 +1,7 @@
 package ui.scene;
 
+import hardware.VulkanContext;
+import hardware.Window;
 import lang.Mat4;
 import entity.Camera;
 
@@ -22,22 +24,6 @@ public class Scene3D extends Scene {
 
     public void setCamera(Camera camera) { this.currentCamera = camera; }
 
-    @Override
-    public void init() {
-        super.init();
-        onResize(this.width, this.height);
-    }
-
-    @Override
-    public void extractUIData(renderer.RenderState state) {
-        // Safe, Just-In-Time Initialization for nested panels
-        if (hardware.Display.getContentPane() != this) {
-            if (this.textureId == -1 && this.width > 0 && this.height > 0) {
-                this.init();
-            }
-        }
-        super.extractUIData(state);
-    }
 
     @Override
     protected void onResize(int width, int height) {
