@@ -639,6 +639,14 @@ public class MasterRenderer {
         if (device != null) {
             vkDeviceWaitIdle(device);
 
+            // --- ADD THIS BLOCK ---
+            for (int i = 0; i < renderTargets.length; i++) {
+                if (renderTargets[i] != null) {
+                    renderTargets[i].destroy();
+                    renderTargets[i] = null;
+                }
+            }
+
             if (VKShader.bindlessDescriptorPool != VK_NULL_HANDLE) {
                 vkDestroyDescriptorPool(device, VKShader.bindlessDescriptorPool, null);
                 vkDestroyDescriptorSetLayout(device, VKShader.bindlessDescriptorSetLayout, null);

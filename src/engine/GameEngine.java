@@ -55,9 +55,10 @@ public class GameEngine {
 
             while (delta >= 1) {
                 float deltaInSeconds = 1.0f / 60.0f;
-                ui.Container root = Window.getContentPane(); // <--- Now uses Window
+                ui.Container root = Window.getContentPane();
                 if (root != null) {
                     root.update(deltaInSeconds);
+                    root.updateTransform(0f, 0f, false);
                 }
                 delta--;
                 ticked = true;

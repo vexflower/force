@@ -20,6 +20,7 @@ public class Main {
 
         Scene3D scene = new Scene3D(1280, 720);
         scene.setBackgroundColor(0, 0, 0, 0);
+        scene.requiresOffscreen = false;
         Window.setContentPane(scene); // <--- Now uses Window
 
         Scene3D scene2 = new Scene3D(400, 400);
@@ -47,7 +48,7 @@ public class Main {
         scene.addEntity(ent);
 
         Random random = new Random();
-        for(int i = 0; i < 2; i++) {
+        for(int i = 0; i < 500; i++) {
             Entity foxIter = new Entity(fox, texture);
             foxIter.setPosition(random.nextFloat(500) - 250, random.nextFloat(500) - 250, random.nextFloat(500) - 250);
             foxIter.moveRotate(random.nextFloat(10), random.nextFloat(300), random.nextFloat(20), -1f);

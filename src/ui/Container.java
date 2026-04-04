@@ -76,7 +76,21 @@ public class Container {
         }
     }
 
+    // Inside Container.java -> replace the current extract3DEntities method
     public void extract3DEntities(RenderState state) {
+        // If a standard panel/container has a background, it needs an FBO generated!
+        if (this.requiresOffscreen && !(this instanceof ui.scene.Scene)) {
+            if (state.snapshotCount < state.snapshots.length) {
+                renderer.SceneSnapshot snap = state.snapshots[state.snapshotCount++];
+                snap.containerId = this.id;
+                snap.isOffscreen = true;
+                snap.width = this.width;
+                snap.height = this.height;
+                snap.bgR = this.bgR; snap.bgG = this.bgG; snap.bgB = this.bgB; snap.bgA = this.bgA;
+                snap.entityCount = 0; // It's just a UI background, no 3D entities
+            }
+        }
+
         for (int i = 0; i < children.size(); i++) {
             children.get(i).extract3DEntities(state);
         }
