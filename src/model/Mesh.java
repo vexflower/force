@@ -27,6 +27,11 @@ public class Mesh {
     public float[] tangents;
     public int[] indices;
 
+    // --- BINDLESS GEOMETRY TRACKERS ---
+    public int vertexOffset; // Where in the Vertex Mega-Buffer does this start?
+    public int firstIndex;   // Where in the Index Mega-Buffer does this start?
+    public int indexCount;   // How many indices make up this specific mesh?
+
     // The Global ID assigned by the MeshLoader
     public int vaoId;
 

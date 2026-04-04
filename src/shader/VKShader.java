@@ -43,9 +43,19 @@ public final class VKShader {
         try (MemoryStack stack = stackPush()) {
             System.out.println("Initializing Global Bindless Texture Array...");
 
-            VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(1, stack);
-            bindings.binding(0).descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+            VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(3, stack);
+
+            // Binding 0: Texture Array
+            bindings.get(0).binding(0).descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                     .descriptorCount(MAX_BINDLESS_TEXTURES).stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
+
+            // Binding 1: Entity Data Mega-Buffer
+            bindings.get(1).binding(1).descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                    .descriptorCount(1).stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+
+            // Binding 2: Global Geometry Mega-Buffer
+            bindings.get(2).binding(2).descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                    .descriptorCount(1).stageFlags(VK_SHADER_STAGE_VERTEX_BIT);
 
             VkDescriptorSetLayoutBindingFlagsCreateInfo layoutFlags = VkDescriptorSetLayoutBindingFlagsCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO)
@@ -108,17 +118,8 @@ public final class VKShader {
             shaderStages.get(0).sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO).stage(VK_SHADER_STAGE_VERTEX_BIT).module(vertModule).pName(stack.UTF8("main"));
             shaderStages.get(1).sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO).stage(VK_SHADER_STAGE_FRAGMENT_BIT).module(fragModule).pName(stack.UTF8("main"));
 
-            VkVertexInputBindingDescription.Buffer bindingDesc = VkVertexInputBindingDescription.calloc(2, stack);
-            bindingDesc.get(0).binding(0).stride(3 * 4).inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
-            bindingDesc.get(1).binding(1).stride(2 * 4).inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
-
-            VkVertexInputAttributeDescription.Buffer attrDesc = VkVertexInputAttributeDescription.calloc(2, stack);
-            attrDesc.get(0).binding(0).location(0).format(VK_FORMAT_R32G32B32_SFLOAT).offset(0);
-            attrDesc.get(1).binding(1).location(1).format(VK_FORMAT_R32G32_SFLOAT).offset(0);
-
             VkPipelineVertexInputStateCreateInfo vertexInputInfo = VkPipelineVertexInputStateCreateInfo.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO)
-                    .pVertexBindingDescriptions(bindingDesc).pVertexAttributeDescriptions(attrDesc);
+                    .sType(VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO);
 
             VkPipelineInputAssemblyStateCreateInfo inputAssembly = VkPipelineInputAssemblyStateCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO).topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
@@ -253,5 +254,24 @@ public final class VKShader {
             buffer.flip();
             return buffer;
         } catch (Exception e) { throw new RuntimeException(e); }
+    }
+
+    public static void pushGlobalData(VkCommandBuffer cmd, int currentInstanceOffset) {
+        PUSH_CONSTANT_BUFFER.clear();
+
+        // 1. vec2 screenSize (We'll leave as 0 for 3D, UI passes can override)
+        PUSH_CONSTANT_BUFFER.put(0f);
+        PUSH_CONSTANT_BUFFER.put(0f);
+
+        // 2. int renderType (0 = Standard 3D Entity)
+        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(0));
+
+        // 3. int instanceOffset (Where in the Mega-Buffer this group starts)
+        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(currentInstanceOffset));
+
+        PUSH_CONSTANT_BUFFER.flip();
+
+        // Push exactly 16 bytes (4 floats)
+        vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, PUSH_CONSTANT_BUFFER);
     }
 }

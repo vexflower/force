@@ -6,10 +6,15 @@ layout(location = 1) in flat int fragTextureId;
 
 layout(location = 0) out vec4 outColor;
 
-// [CHANGED: The Global Phonebook of 4096 Textures!]
+// BINDING 0: The Global Phonebook of 4096 Textures
 layout(binding = 0) uniform sampler2D textures[];
 
 void main() {
-    // Look up the exact texture using the ID, and sample it using the UVs
+    // Zero-overhead texture sampling
     outColor = texture(textures[nonuniformEXT(fragTextureId)], fragTexCoord);
+
+    // Safety check: Discard completely transparent pixels so they don't corrupt the depth buffer
+    if (outColor.a < 0.01) {
+        discard;
+    }
 }

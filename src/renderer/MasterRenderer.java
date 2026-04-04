@@ -2,6 +2,7 @@ package renderer;
 
 import hardware.VulkanContext;
 import hardware.Window;
+import loader.GeomRegistry;
 import loader.MeshLoader;
 import model.Mesh;
 import org.lwjgl.PointerBuffer;
@@ -12,6 +13,7 @@ import org.lwjgl.vulkan.*;
 import shader.VKShader;
 import util.VK;
 
+import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 
@@ -51,6 +53,13 @@ public class MasterRenderer {
     private static long depthImageView;
     // Underneath your other static variables...
     private static final float[] FBO_MATRIX_SCRATCH = new float[16];
+    // 24 floats * 100,000 entities * 3 frames in flight = ~28.8 MB of Host-Visible RAM
+    public static final int MAX_ENTITIES_PER_FRAME = 100000;
+    public static final long ENTITY_BUFFER_SIZE = MAX_ENTITIES_PER_FRAME * 24L * 4L * MAX_FRAMES_IN_FLIGHT;
+
+    private static long globalEntityBuffer;
+    private static long globalEntityMemory;
+    private static long mappedEntityPointer; // Persistent CPU pointer to the GPU RAM
 
     public static void setRenderer()
     {
@@ -67,6 +76,15 @@ public class MasterRenderer {
         createCommandBuffer();
         createSyncObjects();
         initRenderLoopStructs();
+        // Create it as HOST_VISIBLE so Java can memCopy straight into it
+        globalEntityBuffer = VK.createBuffer(ENTITY_BUFFER_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        globalEntityMemory = VK.allocateBufferMemory(globalEntityBuffer, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        try (MemoryStack stack = stackPush()) {
+            PointerBuffer pData = stack.mallocPointer(1);
+            vkMapMemory(VulkanContext.getDevice(), globalEntityMemory, 0, ENTITY_BUFFER_SIZE, 0, pData);
+            mappedEntityPointer = pData.get(0); // Hold this pointer open forever
+        }
     }
 
     private static void initRenderLoopStructs()
@@ -518,24 +536,32 @@ public class MasterRenderer {
     }
 
     private static void drawSnapshotEntities(VkCommandBuffer cmd, SceneSnapshot snap) {
-        try (MemoryStack stack = stackPush()) {
-            int lastMeshId = -1; // Track the last bound mesh
+        if (snap.entityCount == 0) return;
 
-            for (int i = 0; i < snap.entityCount; i++) {
-                int meshId = snap.meshIds[i];
-                int texId = snap.textureIds[i];
+        // 1. FAST ZERO-ALLOCATION UPLOAD TO GPU
+        // We calculate the offset so Frame 0 doesn't overwrite Frame 1's memory
+        long frameOffsetBytes = (long) currentFrame * MAX_ENTITIES_PER_FRAME * 24L * 4L;
+        FloatBuffer gpuBuffer = MemoryUtil.memFloatBuffer(mappedEntityPointer + frameOffsetBytes, snap.entityCount * 24);
+        gpuBuffer.put(snap.entityData, 0, snap.entityCount * 24);
 
-                // ONLY bind the buffers if we switched to a different 3D Model!
-                if (meshId != lastMeshId) {
-                    LongBuffer vertexBuffers = stack.longs(MeshLoader.getVertexBuffer(meshId), MeshLoader.getUvBuffer(meshId));
-                    vkCmdBindVertexBuffers(cmd, 0, vertexBuffers, stack.longs(0, 0));
-                    vkCmdBindIndexBuffer(cmd, MeshLoader.getIndexBuffer(meshId), 0, VK_INDEX_TYPE_UINT32);
-                    lastMeshId = meshId;
-                }
+        // 2. Bind the SINGLE Global Index Buffer
+        vkCmdBindIndexBuffer(cmd, GeomRegistry.gpuIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-                VKShader.pushEntityState(cmd, snap.transforms, i * 16, texId);
-                vkCmdDrawIndexed(cmd, MeshLoader.getIndexCount(meshId), 1, 0, 0, 0);
-            }
+        int currentInstanceOffset = currentFrame * MAX_ENTITIES_PER_FRAME;
+
+        // 3. Issue the Instanced Draw Calls
+        for (int i = 0; i < snap.groupCount; i++) {
+            int indexCount = snap.groupIndexCounts[i];
+            int instanceCount = snap.groupInstanceCounts[i];
+            int firstIndex = snap.groupFirstIndex[i]; // Starts reading indices from exactly where this mesh lives
+
+            // Tell the shader where in the 30MB Mega-Buffer this group's entities start
+            VKShader.pushGlobalData(cmd, currentInstanceOffset);
+
+            // ONE JNI call per mesh group. (e.g., Draws all 50,000 foxes instantly).
+            vkCmdDrawIndexed(cmd, indexCount, instanceCount, firstIndex, 0, 0);
+
+            currentInstanceOffset += instanceCount;
         }
     }
 

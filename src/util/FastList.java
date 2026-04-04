@@ -91,4 +91,17 @@ public final class FastList<E> {
         System.arraycopy(data, 0, newData, 0, size);
         data = newData;
     }
+
+    public boolean contains(E element) {
+        if (element == null) {
+            for (int i = 0; i < size; i++) {
+                if (data[i] == null) return true;
+            }
+        } else {
+            for (int i = 0; i < size; i++) {
+                if (element.equals(data[i])) return true;
+            }
+        }
+        return false;
+    }
 }

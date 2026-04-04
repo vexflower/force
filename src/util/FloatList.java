@@ -77,4 +77,11 @@ public final class FloatList {
         System.arraycopy(data, 0, newData, 0, size);
         data = newData;
     }
+
+    public boolean contains(float value) {
+        for (int i = 0; i < size; i++) {
+            if (data[i] == value) return true;
+        }
+        return false;
+    }
 }
