@@ -131,39 +131,30 @@ public final class GeomMath {
     // VIEW MATRIX (Unrolled R * -T)
     // =========================================================================================
 
-    public static Mat4 createViewMatrix(float posX, float posY, float posZ, float rotX, float rotY, float rotZ, Mat4 dest) {
+    public static Mat4 createViewMatrix(float posX, float posY, float posZ, float pitch, float yaw, float roll, Mat4 dest) {
         if (dest == null) dest = new Mat4();
 
-        float rx = rotX * DEG_TO_RAD;
-        float ry = rotY * DEG_TO_RAD;
-        float rz = rotZ * DEG_TO_RAD;
+        float pitchRad = pitch * DEG_TO_RAD;
+        float yawRad = yaw * DEG_TO_RAD;
 
-        float cx = FastMath.cos32(rx);
-        float sx = FastMath.sin32(rx);
-        float cy = FastMath.cos32(ry);
-        float sy = FastMath.sin32(ry);
-        float cz = FastMath.cos32(rz);
-        float sz = FastMath.sin32(rz);
+        float cp = FastMath.cos32(pitchRad);
+        float sp = FastMath.sin32(pitchRad);
+        float cy = FastMath.cos32(yawRad);
+        float sy = FastMath.sin32(yawRad);
 
-        float r00 = cy * cz;
-        float r01 = cy * sz;
-        float r02 = -sy;
+        // Left-Handed FPS View Matrix (Locks the Up Vector so you can't roll)
+        float m00 = cy;             float m01 = sy * sp;      float m02 = sy * cp;
+        float m10 = 0.0f;           float m11 = cp;           float m12 = -sp;
+        float m20 = -sy;            float m21 = cy * sp;      float m22 = cy * cp;
 
-        float r10 = sx * sy * cz - cx * sz;
-        float r11 = sx * sy * sz + cx * cz;
-        float r12 = sx * cy;
+        dest.m00 = m00; dest.m01 = m01; dest.m02 = m02; dest.m03 = 0.0f;
+        dest.m10 = m10; dest.m11 = m11; dest.m12 = m12; dest.m13 = 0.0f;
+        dest.m20 = m20; dest.m21 = m21; dest.m22 = m22; dest.m23 = 0.0f;
 
-        float r20 = cx * sy * cz + sx * sz;
-        float r21 = cx * sy * sz - sx * cz;
-        float r22 = cx * cy;
-
-        dest.m00 = r00; dest.m01 = r01; dest.m02 = r02; dest.m03 = 0.0f;
-        dest.m10 = r10; dest.m11 = r11; dest.m12 = r12; dest.m13 = 0.0f;
-        dest.m20 = r20; dest.m21 = r21; dest.m22 = r22; dest.m23 = 0.0f;
-
-        dest.m30 = r00 * (-posX) + r10 * (-posY) + r20 * (-posZ);
-        dest.m31 = r01 * (-posX) + r11 * (-posY) + r21 * (-posZ);
-        dest.m32 = r02 * (-posX) + r12 * (-posY) + r22 * (-posZ);
+        // Translate the world opposite to the camera's position
+        dest.m30 = -(m00 * posX + m10 * posY + m20 * posZ);
+        dest.m31 = -(m01 * posX + m11 * posY + m21 * posZ);
+        dest.m32 = -(m02 * posX + m12 * posY + m22 * posZ);
         dest.m33 = 1.0f;
 
         return dest;

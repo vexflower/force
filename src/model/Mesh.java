@@ -37,26 +37,33 @@ public class Mesh {
 
     // --- PRIMITIVE Singletons ---
     public static Mesh SQUARE;
+    public static Mesh FLOOR;
     public static Mesh CUBE;
 
     // [CHANGED: 1] The static block ONLY defines the raw math data now.
     // It does NOT touch Vulkan or the MeshLoader.
     static {
-        SQUARE = new Mesh("Square");
+        SQUARE = new Mesh("square");
         SQUARE.positions = new float[] {
-                -0.5f,  0.5f, 0f, // Top Left
-                -0.5f, -0.5f, 0f, // Bottom Left
-                0.5f, -0.5f, 0f, // Bottom Right
-                0.5f,  0.5f, 0f  // Top Right
+                -0.5f, -0.5f, 0f, // Top Left      (Vulkan Y-Negative is UP)
+                -0.5f,  0.5f, 0f, // Bottom Left   (Vulkan Y-Positive is DOWN)
+                0.5f,  0.5f, 0f, // Bottom Right
+                0.5f, -0.5f, 0f  // Top Right
         };
-        SQUARE.textures = new float[] { 0,0,  0,1,  1,1,  1,0 };
-        SQUARE.indices = new int[] { 0,1,3,  3,1,2 };
+        // Standard UVs mapping to the upright canvas
+        SQUARE.textures = new float[] {
+                0,0,  // Top Left
+                0,1,  // Bottom Left
+                1,1,  // Bottom Right
+                1,0   // Top Right
+        };
+        SQUARE.normals = new float[] {
+                0,0,1,  0,0,1,  0,0,1,  0,0,1
+        };
+        // Counter-Clockwise winding order so it isn't culled
+        SQUARE.indices = new int[] { 0, 1, 3,  3, 1, 2 };
 
-        // Add this right below the SQUARE definition inside the static block of Mesh.java
-
-        CUBE = new Mesh("Cube");
-
-        // 24 Vertices (4 per face)
+        CUBE = new Mesh("cube");
         CUBE.positions = new float[] {
                 // Front face
                 -0.5f,  0.5f,  0.5f,  -0.5f, -0.5f,  0.5f,   0.5f, -0.5f,  0.5f,   0.5f,  0.5f,  0.5f,
@@ -71,33 +78,55 @@ public class Mesh {
                 // Left face
                 -0.5f,  0.5f, -0.5f,  -0.5f, -0.5f, -0.5f,  -0.5f, -0.5f,  0.5f,  -0.5f,  0.5f,  0.5f
         };
-
-        // Standard 0.0 to 1.0 UV mapping for every face
+        // Flipped V-coordinate to fix the upside-down textures after righting the FBO canvas!
         CUBE.textures = new float[] {
-                // Front
-                0,0,  0,1,  1,1,  1,0,
-                // Back
-                0,0,  0,1,  1,1,  1,0,
-                // Top
-                0,0,  0,1,  1,1,  1,0,
-                // Bottom
-                0,0,  0,1,  1,1,  1,0,
-                // Right
-                0,0,  0,1,  1,1,  1,0,
-                // Left
-                0,0,  0,1,  1,1,  1,0
+                1,1,  1,0,  0,0,  0,1, // Front
+                1,1,  1,0,  0,0,  0,1, // Back
+                1,1,  1,0,  0,0,  0,1, // Top
+                1,1,  1,0,  0,0,  0,1, // Bottom
+                1,1,  1,0,  0,0,  0,1, // Right
+                1,1,  1,0,  0,0,  0,1  // Left
         };
-
-        // 36 Indices (6 faces * 2 triangles * 3 vertices)
+        // [NEW] Add the 24 normals for lighting calculations later
+        CUBE.normals = new float[] {
+                0,0,1, 0,0,1, 0,0,1, 0,0,1,       // Front
+                0,0,-1, 0,0,-1, 0,0,-1, 0,0,-1,   // Back
+                0,1,0, 0,1,0, 0,1,0, 0,1,0,       // Top
+                0,-1,0, 0,-1,0, 0,-1,0, 0,-1,0,   // Bottom
+                1,0,0, 1,0,0, 1,0,0, 1,0,0,       // Right
+                -1,0,0, -1,0,0, -1,0,0, -1,0,0    // Left
+        };
+        // ---> THE FIX: Reversed the winding order so the outside faces point AT the camera!
         CUBE.indices = new int[] {
-                0, 1, 3,  3, 1, 2, // Front
-                4, 5, 7,  7, 5, 6, // Back
-                8, 9,11, 11, 9,10, // Top
-                12,13,15, 15,13,14, // Bottom
-                16,17,19, 19,17,18, // Right
-                20,21,23, 23,21,22  // Left
+                0, 3, 1,   3, 2, 1,  // Front
+                4, 7, 5,   7, 6, 5,  // Back
+                8, 11, 9,  11, 10, 9, // Top
+                12, 15, 13, 15, 14, 13, // Bottom
+                16, 19, 17, 19, 18, 17, // Right
+                20, 23, 21, 23, 22, 21  // Left
         };
 
+        // --- NEW: THE TILING FLOOR ---
+        FLOOR = new Mesh("floor");
+        FLOOR.positions = new float[] {
+                -0.5f, 0f, -0.5f, // Top Left
+                -0.5f, 0f,  0.5f, // Bottom Left
+                0.5f, 0f,  0.5f, // Bottom Right
+                0.5f, 0f, -0.5f  // Top Right
+        };
+        // We set UVs to 200 so the texture repeats 200 times across the surface
+        FLOOR.textures = new float[] {
+                0,0,
+                0,200,
+                200,200,
+                200,0
+        };
+        // Inside the static {} block where FLOOR is defined:
+        FLOOR.normals = new float[] {
+                0,1,0,  0,1,0,  0,1,0,  0,1,0
+        };
+        // [FIXED]: Reversed the winding order so it faces UP (+Y)
+        FLOOR.indices = new int[] { 0, 3, 1,  3, 2, 1 };
     }
 
     public Mesh(String name) {
@@ -131,6 +160,7 @@ public class Mesh {
         System.out.println("Uploading primitive meshes to GPU...");
         MeshLoader.loadMesh(SQUARE);
         MeshLoader.loadMesh(CUBE);
+        MeshLoader.loadMesh(FLOOR);
     }
 
     public static Mesh importObject(String fileName) {

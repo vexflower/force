@@ -77,7 +77,18 @@ public class GeomRegistry {
     public static void uploadToGPU() {
         System.out.println("Uploading Bindless Geometry: " + currentVertexOffset + " Vertices, " + currentIndexOffset + " Indices.");
 
-        long[] vData = createBufferFromFloatList(megaVertexBuffer, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT); // Note: STORAGE buffer, not Vertex!
+        // --- VULKAN SAFEGUARD ---
+        // Vulkan will violently crash if we try to allocate a 0-byte buffer.
+        // If the arrays are empty (e.g., loading failed), we inject a single invisible "dummy" vertex.
+        if (megaVertexBuffer.size() == 0 || megaIndexBuffer.size() == 0) {
+            System.err.println("CRITICAL WARNING: Geometry Mega-Buffers are empty! Injecting dummy vertex to prevent GPU crash.");
+            // Add 1 Dummy Vertex (8 floats = 32 bytes)
+            for (int i = 0; i < 8; i++) megaVertexBuffer.add(0f);
+            // Add 1 Dummy Index
+            megaIndexBuffer.add(0);
+        }
+
+        long[] vData = createBufferFromFloatList(megaVertexBuffer, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         gpuVertexBuffer = vData[0];
         gpuVertexMemory = vData[1];
 

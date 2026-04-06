@@ -72,7 +72,6 @@ public class MasterRenderer {
         VKShader.initUberShader(VulkanContext.getDevice(), renderPass, swapchainExtent, "vertex", "fragment");
         createFramebuffers();
         createCommandPool();
-        Mesh.initPrimitives();
         createCommandBuffer();
         createSyncObjects();
         initRenderLoopStructs();
@@ -423,7 +422,6 @@ public class MasterRenderer {
         }
 
         imagesInFlight[imageIndex] = inFlightFences[currentFrame];
-
         vkResetFences(device, inFlightFences[currentFrame]);
         vkResetCommandBuffer(commandBuffers[currentFrame], 0);
 
@@ -431,15 +429,16 @@ public class MasterRenderer {
             throw new RuntimeException("Failed to begin recording command buffer!");
         }
 
+        // ---> THE FIX: Track the memory offset so scenes don't overwrite each other!
+        int currentSSBOOffset = 0;
+
         // ========================================================================
         // PASS 1: RENDER ALL OFF-SCREEN FBOs
         // ========================================================================
         for (int i = 0; i < state.snapshotCount; i++) {
             SceneSnapshot snap = state.snapshots[i];
 
-            // ---> THE FIX: Use pure data flags to resolve the FBO automatically!
             if (snap.isOffscreen) {
-                // Lazy-init the Target if the UI created a new Panel!
                 if (renderTargets[snap.containerId] == null) {
                     renderTargets[snap.containerId] = new RenderTarget(snap.width, snap.height);
                     renderTargets[snap.containerId].init();
@@ -447,7 +446,6 @@ public class MasterRenderer {
 
                 RenderTarget target = renderTargets[snap.containerId];
 
-                // Dynamic FBO Resize Check!
                 if (target.width != snap.width || target.height != snap.height) {
                     target.destroy();
                     target.width = snap.width;
@@ -457,7 +455,10 @@ public class MasterRenderer {
 
                 target.bind(commandBuffers[currentFrame], snap.bgR, snap.bgG, snap.bgB, snap.bgA);
                 VKShader.bindUbershader(commandBuffers[currentFrame]);
-                drawSnapshotEntities(commandBuffers[currentFrame], snap);
+
+                // Pass and update the offset!
+                currentSSBOOffset = drawSnapshotEntities(commandBuffers[currentFrame], snap, currentSSBOOffset);
+
                 target.unbind(commandBuffers[currentFrame]);
             }
         }
@@ -482,10 +483,10 @@ public class MasterRenderer {
                     .extent(swapchainExtent);
             vkCmdSetScissor(commandBuffers[currentFrame], 0, scissor);
 
-            // Find the Root Scene snapshot (the one that is NOT offscreen) and draw it!
             for (int i = 0; i < state.snapshotCount; i++) {
                 if (!state.snapshots[i].isOffscreen) {
-                    drawSnapshotEntities(commandBuffers[currentFrame], state.snapshots[i]);
+                    // Pass and update the offset!
+                    currentSSBOOffset = drawSnapshotEntities(commandBuffers[currentFrame], state.snapshots[i], currentSSBOOffset);
                     break;
                 }
             }
@@ -494,18 +495,14 @@ public class MasterRenderer {
             // PASS 3: STACKED UI PANELS
             // ========================================================================
             if (state.uiElementCount > 0) {
-                int squareMeshId = Mesh.SQUARE.vaoId;
-                LongBuffer vertexBuffers = stack.longs(MeshLoader.getVertexBuffer(squareMeshId), MeshLoader.getUvBuffer(squareMeshId));
-                vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, vertexBuffers, stack.longs(0, 0));
-                vkCmdBindIndexBuffer(commandBuffers[currentFrame], MeshLoader.getIndexBuffer(squareMeshId), 0, VK_INDEX_TYPE_UINT32);
+                vkCmdBindIndexBuffer(commandBuffers[currentFrame], GeomRegistry.gpuIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
                 for (int i = 0; i < state.uiElementCount; i++) {
                     int containerId = state.uiTextureIds[i];
-                    // Automatically grab the texture generated in Pass 1!
                     int actualTexId = renderTargets[containerId] != null ? renderTargets[containerId].textureId : 0;
 
-                    VKShader.pushUIState(commandBuffers[currentFrame], state.uiTransforms, i * 16, actualTexId, (float)hardware.Window.getWidth(), (float)hardware.Window.getHeight());
-                    vkCmdDrawIndexed(commandBuffers[currentFrame], MeshLoader.getIndexCount(squareMeshId), 1, 0, 0, 0);
+                    VKShader.pushUIState(commandBuffers[currentFrame], state.uiTransforms, i * 16, actualTexId, Mesh.SQUARE.vertexOffset, (float)Window.getWidth(), (float)Window.getHeight());
+                    vkCmdDrawIndexed(commandBuffers[currentFrame], Mesh.SQUARE.indexCount, 1, Mesh.SQUARE.firstIndex, 0, 0);
                 }
             }
         }
@@ -533,6 +530,36 @@ public class MasterRenderer {
         }
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+    }
+
+    // ---> THE FIX: Notice the int return type and `ssboOffset` parameter! <---
+    private static int drawSnapshotEntities(VkCommandBuffer cmd, SceneSnapshot snap, int ssboOffset) {
+        if (snap.entityCount == 0) return ssboOffset;
+
+        long frameOffsetBytes = (long) currentFrame * MAX_ENTITIES_PER_FRAME * 24L * 4L;
+        // Shift the memory writing index forward so we don't overwrite previous snapshots!
+        long snapshotOffsetBytes = (long) ssboOffset * 24L * 4L;
+
+        FloatBuffer gpuBuffer = MemoryUtil.memFloatBuffer(mappedEntityPointer + frameOffsetBytes + snapshotOffsetBytes, snap.entityCount * 24);
+        gpuBuffer.put(snap.entityData, 0, snap.entityCount * 24);
+
+        vkCmdBindIndexBuffer(cmd, GeomRegistry.gpuIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+        int currentInstanceOffset = (currentFrame * MAX_ENTITIES_PER_FRAME) + ssboOffset;
+
+        for (int i = 0; i < snap.groupCount; i++) {
+            int indexCount = snap.groupIndexCounts[i];
+            int instanceCount = snap.groupInstanceCounts[i];
+            int firstIndex = snap.groupFirstIndex[i];
+
+            VKShader.pushGlobalData(cmd, currentInstanceOffset);
+            vkCmdDrawIndexed(cmd, indexCount, instanceCount, firstIndex, 0, 0);
+
+            currentInstanceOffset += instanceCount;
+        }
+
+        // Tell the next FBO where it's allowed to start writing
+        return ssboOffset + snap.entityCount;
     }
 
     private static void drawSnapshotEntities(VkCommandBuffer cmd, SceneSnapshot snap) {
@@ -678,6 +705,13 @@ public class MasterRenderer {
                 vkDestroyDescriptorSetLayout(device, VKShader.bindlessDescriptorSetLayout, null);
             }
 
+            // --- THE FIX: Clean up the 28MB Entity Mega-Buffer! ---
+            if (globalEntityBuffer != VK_NULL_HANDLE) {
+                vkDestroyBuffer(device, globalEntityBuffer, null);
+                vkFreeMemory(device, globalEntityMemory, null);
+            }
+            // ------------------------------------------------------
+
             // Do not destroy renderFinishedSemaphores here; cleanupSwapchain() handles it.
             for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
                 vkDestroySemaphore(device, imageAvailableSemaphores[i], null);
@@ -765,5 +799,9 @@ public class MasterRenderer {
                 pSwapchains.put(0, swapchain);
             }
         }
+    }
+
+    public static long getGlobalEntityBuffer() {
+        return globalEntityBuffer;
     }
 }

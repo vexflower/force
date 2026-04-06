@@ -52,19 +52,18 @@ public class Mat4 {
     // ========================================================================
 
     // Creates a 3D Camera Lens
+    // Creates a Left-Handed, Y-Up 3D Camera Lens mapped to Vulkan NDC
     public Mat4 perspective(float fov, float aspect, float zNear, float zFar) {
         float tanHalfFov = (float) Math.tan(Math.toRadians(fov) / 2.0);
-        identity();
+        setZero();
 
         m00 = 1.0f / (aspect * tanHalfFov);
-        m11 = (1.0f / tanHalfFov); // Vulkan Y-flip
-        m22 = -zFar / (zFar - zNear); // Vulkan Z-clip mapping
+        m11 = -(1.0f / tanHalfFov);             // [FLIP Y]: Vulkan is native Y-Down. This flips it to Y-Up!
 
-        // [THE FIX]: These are back in their correct slots!
-        m23 = -1.0f;                                  // Col 2, Row 3 -> The W-Divide
-        m32 = -(zFar * zNear) / (zFar - zNear);       // Col 3, Row 2 -> The Z-Translation
+        m22 = zFar / (zFar - zNear);            // [LEFT-HANDED]: Map Z from Near-Far to Vulkan's 0-1 range
+        m23 = 1.0f;                             // [LEFT-HANDED]: +Z goes FORWARD! W = Z
+        m32 = -(zFar * zNear) / (zFar - zNear);
 
-        m33 = 0.0f;
         return this;
     }
 

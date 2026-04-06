@@ -34,14 +34,11 @@ public class Camera {
     }
 
     public void move(float deltaTime) {
-
-        if(!isCameraMoveable)
-            return;
+        if(!isCameraMoveable) return;
 
         float distance = WALK_SPEED * deltaTime;
         boolean moved = false;
 
-        // --- 1. MOUSE LOOK (Hold Right-Click to pan around) ---
         float mouseX = Mouse.getX();
         float mouseY = Mouse.getY();
 
@@ -55,61 +52,65 @@ public class Camera {
             float dx = mouseX - lastMouseX;
             float dy = mouseY - lastMouseY;
 
-            // Apply sensitivity
-            rotY += dx * MOUSE_SENSITIVITY; // Yaw (Looking left/right)
-            rotX -= dy * MOUSE_SENSITIVITY; // Pitch (Looking up/down)
+            // [FIXED] Standard FPS Mouse Mapping
+            rotY += dx * MOUSE_SENSITIVITY;
+            rotX += dy * MOUSE_SENSITIVITY;
 
-            // Clamp pitch to prevent the camera from doing a backflip
             if (rotX > 89.0f) rotX = 89.0f;
             if (rotX < -89.0f) rotX = -89.0f;
 
             moved = true;
         } else {
-            // Reset state when letting go of right-click so it doesn't snap
             firstMouse = true;
         }
 
         lastMouseX = mouseX;
         lastMouseY = mouseY;
 
-        // --- 2. DIRECTIONAL KEYBOARD MOVEMENT ---
-        // Calculate the direction we are facing using FastMath
+        // --- DIRECTIONAL KEYBOARD MOVEMENT ---
         float yawRad = GeomMath.toRadians(rotY);
-        float sinYaw = lang.FastMath.sin32(yawRad);
-        float cosYaw = lang.FastMath.cos32(yawRad);
+        // [FIXED] Left-Handed Vector Math (+Z Forward, +X Right)
+        float forwardX = lang.FastMath.sin32(yawRad);
+        float forwardZ = lang.FastMath.cos32(yawRad);
+
+        float rightX = lang.FastMath.cos32(yawRad);
+        float rightZ = -lang.FastMath.sin32(yawRad);
 
         if (Keyboard.isKeyDown(Keyboard.W)) {
-            posX += sinYaw * distance;
-            posZ -= cosYaw * distance;
+            posX += forwardX * distance;
+            posZ += forwardZ * distance;
             moved = true;
         }
         if (Keyboard.isKeyDown(Keyboard.S)) {
-            posX -= sinYaw * distance;
-            posZ += cosYaw * distance;
-            moved = true;
-        }
-        if (Keyboard.isKeyDown(Keyboard.A)) {
-            posX -= cosYaw * distance;
-            posZ -= sinYaw * distance;
+            posX -= forwardX * distance;
+            posZ -= forwardZ * distance;
             moved = true;
         }
         if (Keyboard.isKeyDown(Keyboard.D)) {
-            posX += cosYaw * distance;
-            posZ += sinYaw * distance;
+            posX += rightX * distance;
+            posZ += rightZ * distance;
+            moved = true;
+        }
+        if (Keyboard.isKeyDown(Keyboard.A)) {
+            posX -= rightX * distance;
+            posZ -= rightZ * distance;
             moved = true;
         }
         if (Keyboard.isKeyDown(Keyboard.SPACE)) {
-            posY -= distance; // Fly Up
+            posY += distance; // Fly Up (+Y)
             moved = true;
         }
         if (Keyboard.isKeyDown(Keyboard.LEFT_SHIFT)) {
-            posY += distance; // Fly Down
+            posY -= distance; // Fly Down (-Y)
             moved = true;
         }
 
         if (moved) {
             updateViewMatrix();
         }
+
+        // debug when needed
+        // System.out.printf("Camera Position: %f, %f, %f", posX, posY, posZ);
     }
 
     public void updateViewMatrix() {

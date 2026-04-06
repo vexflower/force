@@ -78,8 +78,7 @@ public class Scene extends Container {
 
                         if (entMeshId == meshId) {
                             if (actualMesh == null) {
-                                // Fallback for your current setup to get the offsets
-                                actualMesh = (meshId == model.Mesh.CUBE.vaoId) ? model.Mesh.CUBE : model.Mesh.SQUARE; // Update this to fetch properly!
+                                actualMesh = loader.MeshRegistry.get(meshId); // <--- Instantly grabs the Mesh!
                             }
 
                             int texId = environment.RendererManager.diffuseTextureIds.get(ent.id);

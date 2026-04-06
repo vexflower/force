@@ -31,7 +31,8 @@ public final class VKShader {
     // 17: Render Type (4 bytes - cast to float)
     // 18: Screen X / Padding (4 bytes)
     // 19: Screen Y / Padding (4 bytes)
-    private static final FloatBuffer PUSH_CONSTANT_BUFFER = memAllocFloat(20);
+    // Expand the buffer to 24 floats (96 bytes)
+    private static final FloatBuffer PUSH_CONSTANT_BUFFER = memAllocFloat(24);
 
     // --- BINDLESS HARDWARE ---
     public static final int MAX_BINDLESS_TEXTURES = 4096;
@@ -59,7 +60,11 @@ public final class VKShader {
 
             VkDescriptorSetLayoutBindingFlagsCreateInfo layoutFlags = VkDescriptorSetLayoutBindingFlagsCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO)
-                    .pBindingFlags(stack.ints(VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT));
+                    .pBindingFlags(stack.ints(
+                            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT, // Binding 0 (Textures)
+                            0, // Binding 1 (Entities SSBO)
+                            0  // Binding 2 (Geometry SSBO)
+                    ));
 
             VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
@@ -71,13 +76,18 @@ public final class VKShader {
             vkCreateDescriptorSetLayout(device, layoutInfo, null, pSetLayout);
             bindlessDescriptorSetLayout = pSetLayout.get(0);
 
-            VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(1, stack)
-                    .type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(MAX_BINDLESS_TEXTURES);
+            // INCREASE the buffer size to 2!
+            VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(2, stack);
+
+            // Pool 1: Textures
+            poolSizes.get(0).type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(MAX_BINDLESS_TEXTURES);
+
+            // Pool 2: Our two new Mega-Buffers (SSBOs)
+            poolSizes.get(1).type(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).descriptorCount(2);
 
             VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO).pPoolSizes(poolSizes)
+                    .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO).pPoolSizes(poolSizes) // <-- Uses both now!
                     .maxSets(1).flags(VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT);
-
             LongBuffer pPool = stack.mallocLong(1);
             vkCreateDescriptorPool(device, poolInfo, null, pPool);
             bindlessDescriptorPool = pPool.get(0);
@@ -90,6 +100,37 @@ public final class VKShader {
             LongBuffer pDescriptorSet = stack.mallocLong(1);
             vkAllocateDescriptorSets(device, allocInfo, pDescriptorSet);
             bindlessDescriptorSet = pDescriptorSet.get(0);
+        }
+    }
+
+    /**
+     * Locks the massive SSBO data buffers into the shader's memory pipeline.
+     */
+    public static void bindSSBOs(long entityBuffer, long geometryBuffer) {
+        try (MemoryStack stack = stackPush()) {
+            // Tell Vulkan we want to map the ENTIRE size of both buffers
+            VkDescriptorBufferInfo.Buffer entityInfo = VkDescriptorBufferInfo.calloc(1, stack)
+                    .buffer(entityBuffer).offset(0).range(VK_WHOLE_SIZE);
+
+            VkDescriptorBufferInfo.Buffer geomInfo = VkDescriptorBufferInfo.calloc(1, stack)
+                    .buffer(geometryBuffer).offset(0).range(VK_WHOLE_SIZE);
+
+            VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(2, stack);
+
+            // Link Binding 1 (The Entity Data)
+            writes.get(0).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                    .dstSet(bindlessDescriptorSet).dstBinding(1).dstArrayElement(0)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).descriptorCount(1)
+                    .pBufferInfo(entityInfo);
+
+            // Link Binding 2 (The Global Geometry)
+            writes.get(1).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                    .dstSet(bindlessDescriptorSet).dstBinding(2).dstArrayElement(0)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).descriptorCount(1)
+                    .pBufferInfo(geomInfo);
+
+            vkUpdateDescriptorSets(VulkanContext.getDevice(), writes, null);
+            System.out.println("Global SSBOs successfully linked to the Shader Pipeline.");
         }
     }
 
@@ -132,7 +173,7 @@ public final class VKShader {
             VkPipelineRasterizationStateCreateInfo rasterizer = VkPipelineRasterizationStateCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO)
                     .polygonMode(VK_POLYGON_MODE_FILL).lineWidth(1.0f)
-                    .cullMode(VK_CULL_MODE_BACK_BIT).frontFace(VK_FRONT_FACE_CLOCKWISE);
+                    .cullMode(VK_CULL_MODE_BACK_BIT).frontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE);
 
             VkPipelineDepthStencilStateCreateInfo depthStencil = VkPipelineDepthStencilStateCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO)
@@ -151,7 +192,8 @@ public final class VKShader {
 
             // Total Size: 80 bytes for the Uber shader
             VkPushConstantRange.Buffer pushConstants = VkPushConstantRange.calloc(1, stack)
-                    .stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT).offset(0).size(80);
+                    .stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT).offset(0).size(96);
+
 
             VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
@@ -258,20 +300,35 @@ public final class VKShader {
 
     public static void pushGlobalData(VkCommandBuffer cmd, int currentInstanceOffset) {
         PUSH_CONSTANT_BUFFER.clear();
+        for (int i = 0; i < 16; i++) PUSH_CONSTANT_BUFFER.put(0f); // Blank Matrix
 
-        // 1. vec2 screenSize (We'll leave as 0 for 3D, UI passes can override)
-        PUSH_CONSTANT_BUFFER.put(0f);
-        PUSH_CONSTANT_BUFFER.put(0f);
-
-        // 2. int renderType (0 = Standard 3D Entity)
-        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(0));
-
-        // 3. int instanceOffset (Where in the Mega-Buffer this group starts)
+        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(0)); // Type 0 = 3D Entity
         PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(currentInstanceOffset));
+        PUSH_CONSTANT_BUFFER.put(0f); // Vertex Offset (Unused in 3D)
+        PUSH_CONSTANT_BUFFER.put(0f); // Texture ID (Unused in 3D)
+        PUSH_CONSTANT_BUFFER.put(0f); // Screen X
+        PUSH_CONSTANT_BUFFER.put(0f); // Screen Y
+        PUSH_CONSTANT_BUFFER.put(0f); // Pad
+        PUSH_CONSTANT_BUFFER.put(0f); // Pad
 
         PUSH_CONSTANT_BUFFER.flip();
+        vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, PUSH_CONSTANT_BUFFER);
+    }
 
-        // Push exactly 16 bytes (4 floats)
+    public static void pushUIState(VkCommandBuffer cmd, float[] matrixData, int matrixOffset, int texId, int vertexOffset, float screenW, float screenH) {
+        PUSH_CONSTANT_BUFFER.clear();
+        PUSH_CONSTANT_BUFFER.put(matrixData, matrixOffset, 16); // The UI Matrix
+
+        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(1)); // Type 1 = UI
+        PUSH_CONSTANT_BUFFER.put(0f); // Instance Offset (Unused in UI)
+        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(vertexOffset));
+        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(texId));
+        PUSH_CONSTANT_BUFFER.put(screenW);
+        PUSH_CONSTANT_BUFFER.put(screenH);
+        PUSH_CONSTANT_BUFFER.put(0f); // Pad
+        PUSH_CONSTANT_BUFFER.put(0f); // Pad
+
+        PUSH_CONSTANT_BUFFER.flip();
         vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, PUSH_CONSTANT_BUFFER);
     }
 }

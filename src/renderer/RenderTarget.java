@@ -50,6 +50,9 @@ public class RenderTarget {
             VkAttachmentDescription.Buffer attachments = VkAttachmentDescription.calloc(2, stack);
             VK.modifyBufferAttachments(attachments, exactFormat);
 
+            // ---> THE FIX: Explicitly tell Vulkan this is a Shader Texture, NOT a monitor screen! <---
+            attachments.get(0).finalLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
             VkAttachmentReference.Buffer colorRef = VkAttachmentReference.calloc(1, stack).attachment(0).layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
             VkAttachmentReference depthRef = VkAttachmentReference.calloc(stack).attachment(1).layout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
