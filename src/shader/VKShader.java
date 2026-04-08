@@ -298,6 +298,26 @@ public final class VKShader {
         } catch (Exception e) { throw new RuntimeException(e); }
     }
 
+    // ---> THE FIX: Accept the Camera vpMatrix array
+    public static void pushGlobalData(VkCommandBuffer cmd, int currentInstanceOffset, float[] vpMatrix) {
+        PUSH_CONSTANT_BUFFER.clear();
+
+        // ---> THE FIX: Push the real camera matrix, not zeros!
+        PUSH_CONSTANT_BUFFER.put(vpMatrix, 0, 16);
+
+        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(0)); // Type 0 = 3D Entity
+        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(currentInstanceOffset));
+        PUSH_CONSTANT_BUFFER.put(0f); // Vertex Offset (Unused in 3D)
+        PUSH_CONSTANT_BUFFER.put(0f); // Texture ID (Unused in 3D)
+        PUSH_CONSTANT_BUFFER.put(0f); // Screen X
+        PUSH_CONSTANT_BUFFER.put(0f); // Screen Y
+        PUSH_CONSTANT_BUFFER.put(0f); // Pad
+        PUSH_CONSTANT_BUFFER.put(0f); // Pad
+
+        PUSH_CONSTANT_BUFFER.flip();
+        vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, PUSH_CONSTANT_BUFFER);
+    }
+
     public static void pushGlobalData(VkCommandBuffer cmd, int currentInstanceOffset) {
         PUSH_CONSTANT_BUFFER.clear();
         for (int i = 0; i < 16; i++) PUSH_CONSTANT_BUFFER.put(0f); // Blank Matrix

@@ -1,12 +1,15 @@
 package engine;
 
 import entity.Entity;
+import entity.Camera;
 import hardware.VulkanContext;
 import hardware.Window;
 import loader.MeshLoader;
 import loader.MeshRegistry;
 import loader.TextureLoader;
 import model.Mesh;
+import move.Move;
+import move.MoveType;
 import renderer.MasterRenderer;
 import ui.Panel;
 import ui.scene.Scene3D;
@@ -34,7 +37,7 @@ public class Main {
 
         // 4. --- BUILD THE SCENE ---
         Scene3D scene = new Scene3D(1280, 720);
-        scene.setBackgroundColor(0, 0, 0, 0);
+        scene.setBackgroundColor(0, 0, 0, 1);
         scene.requiresOffscreen = false;
         Window.setContentPane(scene);
 
@@ -43,7 +46,7 @@ public class Main {
         Entity floor = new Entity(MeshRegistry.get("floor"), bratTex); // Reusing fox tex for now
         floor.setPosition(0, 0, 0); // Put it slightly below the camera
         floor.setRotation(0, 0, 0); // Lay it flat on the ground
-        floor.scale = 200f;
+        floor.scale = 2000f;
         scene.addEntity(floor);
 
         Scene3D scene2 = new Scene3D(400, 400);
@@ -54,29 +57,37 @@ public class Main {
         Entity brat = new Entity(MeshRegistry.get("cube"), bratTex);
         brat.setPosition(0, 0, 150);
         brat.setRotation(0, 200f, 0);
-        brat.scale = 10f;
+        brat.scale = 50f;
         scene2.addEntity(brat);
         scene2.addEntity(floor);
         scene.add(scene2);
 
-        entity.Camera cam = new entity.Camera();
+        Camera cam = new Camera();
         cam.setPosition(0f, 20f, 0);
         scene.setCamera(cam);
         scene2.setCamera(cam);
         scene2.updatesCamera = false;
 
+        // Inside Main.java
+        // Replace the old ent setup with this:
         Entity ent = new Entity(MeshRegistry.get("fox"), foxTex);
-        ent.setPosition(0, 20f, 200f);
-        ent.moveRotate(0f, 90f, 0f, -1f);
+        ent.setPosition(0, 200f, 200f); // Start way up in the air
+        ent.scale = 30f;
+        scene.addEntity(ent);
+
+        // Tell the engine to drop it to Y=20 over 2 seconds using a bouncy curve
+        ent.move(Move.BOUNCE_OUT, MoveType.POINT, 0f, 0f, 200f, 3f);
+
         scene.addEntity(ent);
 
         java.util.Random random = new java.util.Random();
-        for(int i = 0; i < 0; i++) {
-            Entity foxIter = new Entity(MeshRegistry.get("fox"), foxTex);
-            foxIter.setPosition(random.nextFloat(500) - 250, random.nextFloat(500) - 250, random.nextFloat(500) - 250);
-            foxIter.moveRotate(random.nextFloat(10), random.nextFloat(300), random.nextFloat(20), -1f);
-            scene.addEntity(foxIter);
-        }
+//        for(int i = 0; i < 1000; i++) {
+//            Entity foxIter = new Entity(MeshRegistry.get("fox"), foxTex);
+//            foxIter.scale = 30f;
+//            foxIter.setPosition(random.nextFloat(500) - 250, random.nextFloat(500) - 250, random.nextFloat(500) - 250);
+//            //oxIter.moveRotate(random.nextFloat(10), random.nextFloat(300), random.nextFloat(20), -1f);
+//            scene.addEntity(foxIter);
+//        }
 
         brat.moveRotate(0f, -90f, 0, -1);
 

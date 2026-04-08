@@ -39,9 +39,22 @@ public class Scene3D extends Scene {
             // In Scene3D.java update()
             projectionMatrix.mul(currentCamera.viewMatrix, vpMatrix);
             for (int i = 0; i < activeEntities.size(); i++) {
-                activeEntities.get(i).update(delta, vpMatrix);
+                activeEntities.get(i).update(delta);
             }
         }
         super.update(delta);
+    }
+
+    // ---> THE FIX: Inject the Camera Matrix into the Snapshot! <---
+    @Override
+    public void extract3DEntities(renderer.RenderState state) {
+        // Intercept the snapshot BEFORE the superclass increments the counter
+        if (state.snapshotCount < state.snapshots.length) {
+            // Copy our 3D Camera matrix directly into the snapshot's float array
+            vpMatrix.store(state.snapshots[state.snapshotCount].vpMatrix, 0);
+        }
+
+        // Now let the base Scene pack the entities as normal
+        super.extract3DEntities(state);
     }
 }

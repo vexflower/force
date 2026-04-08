@@ -100,10 +100,52 @@ public final class MeshLoader {
         if (texCoords != null) {
             for (int i = 0; i < vertexCount; i++) {
                 AIVector3D t = texCoords.get(i);
+
                 mesh.textures[i * 2] = t.x();
                 mesh.textures[i * 2 + 1] = flipUV ? (1.0f - t.y()) : t.y();
             }
         }
+
+        // ====================================================================
+        // --- 3. AAA METRIC NORMALIZATION (Fit to 1x1x1 Unit Cube) ---
+        // ====================================================================
+        float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, minZ = Float.MAX_VALUE;
+        float maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
+
+        // Step A: Find the extreme bounding box limits of the raw model
+        for (int i = 0; i < vertexCount; i++) {
+            float x = mesh.positions[i * 3];
+            float y = mesh.positions[i * 3 + 1];
+            float z = mesh.positions[i * 3 + 2];
+
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (z < minZ) minZ = z;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+            if (z > maxZ) maxZ = z;
+        }
+
+        // Step B: Calculate the exact center point and the longest dimension
+        float centerX = (minX + maxX) / 2.0f;
+        float centerY = (minY + maxY) / 2.0f;
+        float centerZ = (minZ + maxZ) / 2.0f;
+
+        float sizeX = maxX - minX;
+        float sizeY = maxY - minY;
+        float sizeZ = maxZ - minZ;
+
+        // Find the absolute largest side of the bounding box
+        float maxDimension = Math.max(sizeX, Math.max(sizeY, sizeZ));
+        if (maxDimension == 0) maxDimension = 1.0f; // Prevent division by zero
+
+        // Step C: Shift the model to the absolute Origin (0,0,0) and scale it to 1.0
+        for (int i = 0; i < vertexCount; i++) {
+            mesh.positions[i * 3]     = (mesh.positions[i * 3] - centerX) / maxDimension;
+            mesh.positions[i * 3 + 1] = (mesh.positions[i * 3 + 1] - centerY) / maxDimension;
+            mesh.positions[i * 3 + 2] = (mesh.positions[i * 3 + 2] - centerZ) / maxDimension;
+        }
+        // ====================================================================
 
         int faceCount = aiMesh.mNumFaces();
         AIFace.Buffer faces = aiMesh.mFaces();

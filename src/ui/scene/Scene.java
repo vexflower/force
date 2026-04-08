@@ -77,35 +77,39 @@ public class Scene extends Container {
                         int entMeshId = environment.RendererManager.meshIds.get(ent.id);
 
                         if (entMeshId == meshId) {
-                            if (actualMesh == null) {
-                                actualMesh = loader.MeshRegistry.get(meshId); // <--- Instantly grabs the Mesh!
+                            if (actualMesh == null) actualMesh = loader.MeshRegistry.get(meshId);
+
+                            if (snap.entityCount == 0) {
+                                snap.globalEntityOffset = state.totalEntities;
                             }
 
-                            int texId = environment.RendererManager.diffuseTextureIds.get(ent.id);
-                            int offset = snap.entityCount * 24;
+                            // Write DIRECTLY to this snapshot's isolated off-heap buffer
+                            long finalPtr = snap.entityDataPtr + (snap.entityCount * 96L);
 
-                            // 1. Pack Matrix (16 floats)
-                            ent.mvpMatrix.store(snap.entityData, offset);
+                            // 1. Blast the Matrix
+                            ent.modelMatrix.store(finalPtr);
 
-                            // 2. Pack Integers as bitwise Floats (Zero GC)
-                            snap.entityData[offset + 16] = Float.intBitsToFloat(texId);
-                            snap.entityData[offset + 17] = Float.intBitsToFloat(actualMesh.vertexOffset);
+                            // 2. Write Texture & Flags via MemoryUtil (Offsets 64-76)
+                            org.lwjgl.system.MemoryUtil.memPutFloat(finalPtr + 64, Float.intBitsToFloat(ent.material.diffuseTextureId));
+                            org.lwjgl.system.MemoryUtil.memPutFloat(finalPtr + 68, Float.intBitsToFloat(actualMesh.vertexOffset));
+                            org.lwjgl.system.MemoryUtil.memPutFloat(finalPtr + 72, 1.0f); // isVisible
+                            org.lwjgl.system.MemoryUtil.memPutFloat(finalPtr + 76, ent.material.transparency < 1.0f ? 1.0f : 0.0f);
 
-                            // 3. Padding to maintain 32-byte struct alignment
-                            snap.entityData[offset + 18] = 0f;
-                            snap.entityData[offset + 19] = 0f;
-                            snap.entityData[offset + 20] = 0f;
-                            snap.entityData[offset + 21] = 0f;
-                            snap.entityData[offset + 22] = 0f;
-                            snap.entityData[offset + 23] = 0f;
+                            // 3. Write Material Properties (Offsets 80-92)
+                            org.lwjgl.system.MemoryUtil.memPutFloat(finalPtr + 80, ent.material.celShade);
+                            org.lwjgl.system.MemoryUtil.memPutFloat(finalPtr + 84, ent.material.reflectivity);
+                            org.lwjgl.system.MemoryUtil.memPutFloat(finalPtr + 88, ent.material.shineDamper);
+                            org.lwjgl.system.MemoryUtil.memPutFloat(finalPtr + 92, 0.0f); // padding
 
                             snap.entityCount++;
+                            state.totalEntities++;
                             instanceCount++;
                         }
                     }
 
                     // Record the grouped command for the GPU
                     int groupIdx = snap.groupCount++;
+                    assert actualMesh != null;
                     snap.groupFirstIndex[groupIdx] = actualMesh.firstIndex;
                     snap.groupIndexCounts[groupIdx] = actualMesh.indexCount;
                     snap.groupInstanceCounts[groupIdx] = instanceCount;

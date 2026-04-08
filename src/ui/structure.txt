@@ -1,64 +1,371 @@
-master renderer setting up
+integer constants, class: BlendMode
+BlendMode.normal
+BlendMode.darken
+BlendMode.multiply
+BlendMode.colorBurn
+BlendMode.linearBurn
+BlendMode.darkerColor
+BlendMode.lighten
+BlendMode.screen
+BlendMode.colorDodge
+BlendMode.linearDodge
+BlendMode.add
+BlendMode.lighterColor
+BlendMode.overlay
+BlendMode.softLight
+BlendMode.hardLight
+BlendMode.vividLight
+BlendMode.linearLight
+BlendMode.pinLight
+BlendMode.hardMix
+BlendMode.invert
+BlendMode.difference
+BlendMode.exclusion
+BlendMode.subtract
+BlendMode.divide
+BlendMode.hue
+BlendMode.saturation
+BlendMode.color
+BlendMode.luminosity
+BlendMode.average
 
-add a 3d scene that acts as a container
-setting it up as content panel
+Filter class
+Filter.brightness
+Filter.contrast
+Filter.hue
+Filter.saturation
+Filter.redBalance
+Filter.greenBalance
+Filter.blueBalance
+Filter.grayscale
+Filter.redGrayscale
+Filter.greenGrayccale
+Filter.blueGrayscale
+Filter.bnw
+Filter.gaussianBlur
+Filter.boxBlur
+Filter.lineBlur
+Filter.setLineBlur(angle); // horizontal or vertical based blur, but angle on which you will go, it is vertical blur by default.
+Filter.horizontalBlur
+Filter.verticalBlur
+Filter.noise
+Filter.setNoise(BlendingMode, long seed);
+Filter.glitch
+Filter.setGlitch(int height, int colorShift);
+Filter.chromaticMove
+Filter.setChromaticAberrationAngle(float angle, ColorChannel)
+Filter.chromaticZoom
+Filter.setChromaticAbberationZoom(x, y, ColorChannel)
+Filter.exposure
+Filter.brilliance
+Filter.highlights
+Filter.shadows
+Filter.blackPoint
+Filter.vibrance
+Filter.warmth
+Filter.tint
+Filter.sharpness
+Filter.definition
+Filter.denoise
+Filter.vignette
 
-add entities in the 3d scene using addEntity() that is inherited from scene.java
-the process of addEntity():
+TextureFilter class
+TextureFilter.brightness
+TextureFilter.contrast
+TextureFilter.hue
+TextureFilter.saturation
+TextureFilter.redBalance
+TextureFilter.greenBalance
+TextureFilter.blueBalance
+TextureFilter.grayscale
+TextureFilter.redGrayscale
+TextureFilter.greenGrayccale
+TextureFilter.blueGrayscale
+TextureFilter.bnw
+TextureFilter.gaussianBlur
+TextureFilter.boxBlur
+TextureFilter.lineBlur
+TextureFilter.setLineBlur(angle); // horizontal or vertical based blur, but angle on which you will go, it is vertical blur by default.
+TextureFilter.horizontalBlur
+TextureFilter.verticalBlur
+TextureFilter.noise
+TextureFilter.setNoise(BlendingMode, long seed);
+TextureFilter.glitch
+TextureFilter.setGlitch(int height, int colorShift);
+TextureFilter.chromaticMove
+TextureFilter.setChromaticAberrationAngle(float angle, ColorChannel)
+TextureFilter.chromaticZoom
+TextureFilter.setChromaticZoom(x, y, ColorChannel)
+TextureFilter.exposure
+TextureFilter.brilliance
+TextureFilter.highlights
+TextureFilter.shadows
+TextureFilter.blackPoint
+TextureFilter.vibrance
+TextureFilter.warmth
+TextureFilter.tint
+TextureFilter.sharpness
+TextureFilter.definition
+TextureFilter.denoise
+TextureFilter.vignette
 
-extract the id of the mesh
-extract the id of the textures
-extract the transform
-extract the material from the entity
+ColorChannel class
+red
+ColorChannel.RGBA
+ColorChannel.RGAB
+ColorChannel.RBGA
+ColorChannel.RBAG
+ColorChannel.RABG
+ColorChannel.RAGB
+green
+ColorChannel.GRBA
+ColorChannel.GRAB
+ColorChannel.GBRA
+ColorChannel.GBAR
+ColorChannel.GARB
+ColorChannel.GABR
+blue
+ColorChannel.BRGA
+ColorChannel.BRAG
+ColorChannel.BGRA
+ColorChannel.BGAR
+ColorChannel.BAGR
+ColorChannel.BARG
 
-entity class is high level, which is fine (?) ish? because thats just part of the cpu logic and its fine
-if the entities would take around 200 MB of ram for hundreds of thousands of coordinates, as long as it will be
-transferred to the gpu without any bottleneck. which means, we might have to process everything with a hashmap
-with a string or charsequuence that handles all the stuff, changes the stuff, or use indexes to see which array
-will be used to process everything, unless we really can do instanced rendering, doesnt matter if the meshes are different
-(if thats even poossible), please challenge me and try to make it zero GC as possible
+alpha
+ColorChannel.ARGB
+ColorChannel.ARBR
+ColorChannel.AGRB
+ColorChannel.AGBR
+ColorChannel.ABGR
+ColorChannel.ABRG
 
-also, we dont really need to complicate the matrix calculations on the containers (as frames) because theyre just ndc locations
-that just needs calculation from the screen all at once (or off screen on the framebuffer) so i hope we can address that.
+Move class
+Move.NORMAL
+Move.EASE_IN_OUT // stair based movement (times n, not power of n)
+Move.EASE_IN
+Move.EASE_OUT
+Move.ELASTIC_IN_OUT // arc based movement
+Move.ELASTIC_IN
+Move.ELASTIC_OUT
+Move.BOUNCE_IN_OUT // bouncing with in and out (merged)
+Move.BOUNCE_IN // inverse bouncing
+Move.BOUNCE_OUT // normal bouncing
+Move.EXPONENTIAL_IN_OUT // exponential (power of n)
+Move.EXPONENTIAL_IN
+Move.EXPONENTIAL_OUT
+Move.SINE_IN_OUT // sin based movement
+Move.SINE_IN
+Move.SINE_OUT
 
-so the main should be like this:
+Move.setEaseAmount(float power)
+Move.setElasticAmount(float power)
+Move.setBounceAmount(float power, float dividend) // power, the higher the amount, the higher the bounce
+Move.setBounceAmount(float power, float dividend) // dividend, the higher the amount, the higher the bounce length after another bounce.
+Move.setExponentialAmount(float power) // kinda self explanatory
+Move.setSineAmount(float power)
 
-package engine;
+MoveType
+moveType.studs // move by how many pixels/studs
+moveType.point // move to the specific location
 
-import environment.RendererManager;
-import hardware.Display;
-import lang.GeomMath;
-import lang.Mat4;
-import renderer.MasterRenderer;
-import ui.Panel;
-import ui.scene.Scene3D;
+Material class
+Material.reflectivity
+Material.shineDamper
+Material.celShade
+Material.metallic
+Material.roughness
+Material.emissive
+Material.ambientOcclusion
 
-public class Main {
-    static void main(String[] args) {
-        Display.createDisplay(0, 1280, 720);
-        Display.setShowFPSTitle(true);
-        MasterRenderer.setRenderer();
+scene2d and scene3d
+it has its own filter object
+.setSize(width, height)
+.setPosition(x, y)
+.setBackgroundColor(r, g, b, a);
+.setBackgroundColor(r, g, b, a, duration);
+.setBlendMode(BlendMode)
+.setBlendMode(BlendMode, duration) // for how long to transition
+.setOpacity(value)
+.setOpacity(value, duration) // for how long to duration
+.setVisible(flag)
+.setCamera(camera);
+.setColorChannel(ColorChannel)
+.addContainer(Container)
+.addContainer(Container, int zLevel) // so that it can be put in the very top or bottom (0 - very bottom, -1 means very top by default (when you dont know how much panels are stacking), other else are number of the layer. NO NEGATIVE NUMBERS BEYOND -1)
+.addEntity(Entity)
+.moveScene(Move, MoveType, destX, destY, duration (-1f means infinite)); // if -1, any move will be NORMAL by default.
+.moveCamera(Move, MoveType, destX, destY, destZ, duration (-1f means infinite)); // if -1, any move will be NORMAL by default.
+.rotateCamera(Move, MoveType, pitch, yaw, roll, duration (-1f means infinite)); // if -1, any move will be NORMAL by default.
+.addMouseListener(MouseAdapter)
+.addKeyListener(KeyAdapter)
+.setEnabled(flag)
+.setFocused()
+.transferFocus()
+.setFilter(Filter, float amount)
+.setFilter(Filter, float amount, duration);
+.addDatamosh(id) // this will act as a datamoshed texture in front of the screen so that it can be clipped (inspired by shadow maps)
 
-        Scene3D scene = new Scene(1280, 720)
-        Display.setContentPane(scene);
+Culling class
+Cull.BACK
+Cull.FRONT
+Cull.FRONT_AND_BACK
+Cull.NONE
+Cull.OCCLUSION
+Cull.FRUSTUM
 
-        int texture = TextureLoader.loadTexture("brat");
-        Entity ent = new Entity(mesh: Mesh.CUBE, texture: texture);
-        ent.setPosition(0, 0, -2f);
-        ent.moveRotate(0f, 200f, 0f, -1f (infinite movement)); // 200 degrees per second
+Physics
+.setMass(float);
+.setFriction(float);
+.setRestitution(float);
+.setVelocity(x, y, z);
+.addForce(x, y, z)
+.addImpulse(x, y, z);
 
-        scene.addEntity(ent);
+Light
+Light.DIRECTIONAL
+Light.POINT
+Light.SPOT
 
-        // 2. A standard UI Panel (Static size)
-        // panel should already call init() by itself btw...
-        Panel myPanel = new Panel(300, 300);
-        myPanel.setBackgroundColor(0.8f, 0.1f, 0.1f, 0.7f);
-        myPanel.setPosition(50, 50);
-        scene.add(myPanel);
+.setPosition(x, y, z)
+.setRotation(x, y, z)
+.setRotation(x, y, z, pointX, pointY, pointZ)
+.move(move, moveType, x, y, z, duration);
+.moveRotate(move, moveType, x, y, z, duration);
+.moveRotate(move, moveType, x, y, z, pointX, pointY, pointZ, duration);
+.setAttenuation(linear, quadratic, other);
+.setLightLimit(x, y, z) // this is where we can make spotlights to limit which angle does the light can have
+.
 
-        // Run the completely generic engine
-        GameEngine.start();
-    }
-}
+
+entity
+it has its own filter object
+and a material object
+.setPosition(x, y, z)
+.setRotation(x, y, z)
+.setRotation(x, y, z, pointX, pointY, pointZ); // rotates the object based on the point reference
+.setScale(scale); // this makes it more one
+.setScale(scale, pointX, pointY, pointZ); // this makes it more one
+.setScale(x, y, z);
+.setScale(x, y, z, pointX, pointY, pointZ);
+.setDepthTested(flag);
+.setBlendMode(BlendMode);
+.setOpacity(value)
+.setOpacity(value, duration);
+.setCull(Culling)
+.setMesh(id)
+.setMeshMipmap(flag) // lowers the quality of the mesh so that it can be rendered lower
+.setTextureMipmap(flag) // lowers the quality of the texture so that it can be rendered lower
+.setUVMap(id)
+.setUVMap(id, duration)
+.setNormalMap(id)
+.setNormalMap(id, duration)
+.setSpecularMap(id)
+.setSpecularMap(id, duration)
+.setTextureMap(id) // overlay texture so that it makes it more rough if possible
+.setTextureMap(id, duration) // overlay texture so that it makes it more rough if possible
+.setVisible(flag)
+.setBillboard(flag)
+.setColliding(flag)
+.setShadowed(flag) // shadowed which means it can be included in the shadow map
+.setShadowable(flag) // shadowable which means the entity will be shadowed to the texture
+.setBoundBox(meshId)
+.setAnchored(flag) // when false, the entity falls using physics.
+.move(move, moveType, x, y, z, duration);
+.moveRotate(move, moveType, x, y, z, duration);
+.moveRotate(move, moveType, x, y, z, pointX, pointY, pointZ, duration);
+.moveScale(move, moveType, x, y, z, duration); // two types of scale
+.moveScale(move, moveType, x, y, z, pointX, pointY, pointZ, duration); // two types of scale
+.moveScale(move, moveType, scale, duration); // another type of scale
+.setMaterial(Material, float amount);
+.addEntityListener(EntityAdapter)
+.addMouseListener(MouseAdapter)
+.addKeyListener(KeyAdapter)
+.setEnabled(flag)
+.enableGlassFilter(flag) // creates it own renderCube
+.setGlassQuality(value) // 1 means full quality render (based on the viewport), but 0 isnt allowed
+.setFocused()
+.transferFocus()
+.setColorChannel(ColorChannel)
+.setColorChannel(ColorChannel, duration)
+.setTextureFilter(TextureFilter, float amount)
+.setTextureFilter(TextureFilter, float amount, duration);
+.setAudio(audio)
+
+Audio class
+.setClipId(id)
+.setClipVolume(float)
+.setClipLooping(boolean)
+.setSpatial(boolean)
+.setPitch(float)
+.setReverb(float)
+.setEcho(float)
+.setLowPass(float)
+.setBits(float)
+.setFrequency(float)
+.setSpeed(float)
+
+
+EntityGroup (of entity) class
+.setName(name)
+.setPosition(x, y, z)
+.setRotation(x, y, z)
+.setRotation(x, y, z, pointX, pointY, pointZ)
+.setScale(scale)
+.setScale(x, y, z)
+.setScale(scale, pointX, pointY, pointZ)
+.setScale(x, y, z, pointX, pointY, pointZ)
+.setReferencePoint(x, y, z)
+.move(move, movetype, x, y, z, duration)
+.moveRotation(move, movetype, x, y, z, duration)
+.moveRotation(move, moveType, x, y, z, pointX, pointY, pointZ, duration)
+.moveScale(move, moveType, scale, duration)
+.moveScale(move, moveType, scale, pointX, pointY, pointZ, duration)
+.moveScale(move, moveType, x, y, z, pointX, pointY, pointZ, duration)
+.addGroup(group) // merges all groups from groups, to another group, for hierarchical context
+.addEntity(entity)
+.setAnchored(flag)
+.setCull(Culling)
+.setColliding(flag)
+.setDepthTest(flag)
+.addGroupListener(GroupAdapter)
+.addMouseListener(MouseAdapter)
+.addKeyListener(KeyAdapter)
+.setEnabled(flag)
+.setFocused()
+.transferFocus()
+.setColorChannel(ColorChannel)
+.setColorChannel(ColorChannel, duration)
+.setTextureFilter(TextureFilter, float amount)
+.setTextureFilter(TextureFilter, float amount, duration);
+
+Mesh
+meshes:
+Mesh.SQUARE
+Mesh.FLOOR
+Mesh.CUBE
+Mesh.SPHERE
+Mesh.
+
+Player (extends entity)
+// makes the methods from entity class to be here
+.setCamera(camera)
+
+Label (text label) extends Container // this will be made eventually. font rendering is quite complex yet
+.setText(text)
+.setFont(font)
+.setWidth(width)
+.setHeight(height)
+.setPosition(x, y);
+.setRotation(x, y, z);
+.scale(x, y, z);
+.setFontSize(float);
+.setFilter(filter, amount)
+.setFilter(filter, amount, duration)
+
+
+
+
+
 
 

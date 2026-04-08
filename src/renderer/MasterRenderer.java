@@ -32,8 +32,6 @@ public class MasterRenderer {
 
     private static long renderPass;
     private static long[] framebuffers;
-
-    public static final int MAX_FRAMES_IN_FLIGHT = 2;
     private static int currentFrame = 0;
 
     private static long commandPool;
@@ -55,7 +53,9 @@ public class MasterRenderer {
     private static final float[] FBO_MATRIX_SCRATCH = new float[16];
     // 24 floats * 100,000 entities * 3 frames in flight = ~28.8 MB of Host-Visible RAM
     public static final int MAX_ENTITIES_PER_FRAME = 100000;
-    public static final long ENTITY_BUFFER_SIZE = MAX_ENTITIES_PER_FRAME * 24L * 4L * MAX_FRAMES_IN_FLIGHT;
+    public static final int MAX_FRAMES_IN_FLIGHT = 3; // True Triple Buffering
+    // 96 bytes per entity.
+    public static final long ENTITY_BUFFER_SIZE = MAX_ENTITIES_PER_FRAME * 96L * MAX_FRAMES_IN_FLIGHT;
 
     private static long globalEntityBuffer;
     private static long globalEntityMemory;
@@ -456,8 +456,8 @@ public class MasterRenderer {
                 target.bind(commandBuffers[currentFrame], snap.bgR, snap.bgG, snap.bgB, snap.bgA);
                 VKShader.bindUbershader(commandBuffers[currentFrame]);
 
-                // Pass and update the offset!
-                currentSSBOOffset = drawSnapshotEntities(commandBuffers[currentFrame], snap, currentSSBOOffset);
+                // THE FIX: Use the snapshot's calculated offset!
+                drawSnapshotEntities(commandBuffers[currentFrame], state.snapshots[i], state.snapshots[i].globalEntityOffset, state.frameIndex);
 
                 target.unbind(commandBuffers[currentFrame]);
             }
@@ -485,8 +485,8 @@ public class MasterRenderer {
 
             for (int i = 0; i < state.snapshotCount; i++) {
                 if (!state.snapshots[i].isOffscreen) {
-                    // Pass and update the offset!
-                    currentSSBOOffset = drawSnapshotEntities(commandBuffers[currentFrame], state.snapshots[i], currentSSBOOffset);
+                    // THE FIX: Pass globalEntityOffset AND state.frameIndex
+                    drawSnapshotEntities(commandBuffers[currentFrame], state.snapshots[i], state.snapshots[i].globalEntityOffset, state.frameIndex);
                     break;
                 }
             }
@@ -532,64 +532,37 @@ public class MasterRenderer {
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
-    // ---> THE FIX: Notice the int return type and `ssboOffset` parameter! <---
-    private static int drawSnapshotEntities(VkCommandBuffer cmd, SceneSnapshot snap, int ssboOffset) {
+    // THE FIX: Accept stateFrameIndex as a parameter!
+    private static int drawSnapshotEntities(VkCommandBuffer cmd, SceneSnapshot snap, int ssboOffset, int stateFrameIndex) {
         if (snap.entityCount == 0) return ssboOffset;
 
-        long frameOffsetBytes = (long) currentFrame * MAX_ENTITIES_PER_FRAME * 24L * 4L;
-        // Shift the memory writing index forward so we don't overwrite previous snapshots!
-        long snapshotOffsetBytes = (long) ssboOffset * 24L * 4L;
+        // 1. Calculate safe GPU pointers using the Logic Thread's frame index
+        long frameOffsetBytes = (long) stateFrameIndex * MAX_ENTITIES_PER_FRAME * 96L;
+        long snapshotOffsetBytes = (long) ssboOffset * 96L;
+        long gpuDestPtr = mappedEntityPointer + frameOffsetBytes + snapshotOffsetBytes;
 
-        FloatBuffer gpuBuffer = MemoryUtil.memFloatBuffer(mappedEntityPointer + frameOffsetBytes + snapshotOffsetBytes, snap.entityCount * 24);
-        gpuBuffer.put(snap.entityData, 0, snap.entityCount * 24);
+        // 2. FAST NATIVE COPY: Transfer isolated snapshot memory directly to Vulkan mapped memory
+        org.lwjgl.system.MemoryUtil.memCopy(snap.entityDataPtr, gpuDestPtr, snap.entityCount * 96L);
 
         vkCmdBindIndexBuffer(cmd, GeomRegistry.gpuIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-        int currentInstanceOffset = (currentFrame * MAX_ENTITIES_PER_FRAME) + ssboOffset;
+        // Tell the shader exactly where in the SSBO to start reading.
+        // CRITICAL: Must use stateFrameIndex, NOT currentFrame!
+        int currentInstanceOffset = (stateFrameIndex * MAX_ENTITIES_PER_FRAME) + ssboOffset;
 
         for (int i = 0; i < snap.groupCount; i++) {
             int indexCount = snap.groupIndexCounts[i];
             int instanceCount = snap.groupInstanceCounts[i];
             int firstIndex = snap.groupFirstIndex[i];
 
-            VKShader.pushGlobalData(cmd, currentInstanceOffset);
+            // Push the Camera matrix and issue the draw call
+            VKShader.pushGlobalData(cmd, currentInstanceOffset, snap.vpMatrix);
             vkCmdDrawIndexed(cmd, indexCount, instanceCount, firstIndex, 0, 0);
 
             currentInstanceOffset += instanceCount;
         }
 
-        // Tell the next FBO where it's allowed to start writing
         return ssboOffset + snap.entityCount;
-    }
-
-    private static void drawSnapshotEntities(VkCommandBuffer cmd, SceneSnapshot snap) {
-        if (snap.entityCount == 0) return;
-
-        // 1. FAST ZERO-ALLOCATION UPLOAD TO GPU
-        // We calculate the offset so Frame 0 doesn't overwrite Frame 1's memory
-        long frameOffsetBytes = (long) currentFrame * MAX_ENTITIES_PER_FRAME * 24L * 4L;
-        FloatBuffer gpuBuffer = MemoryUtil.memFloatBuffer(mappedEntityPointer + frameOffsetBytes, snap.entityCount * 24);
-        gpuBuffer.put(snap.entityData, 0, snap.entityCount * 24);
-
-        // 2. Bind the SINGLE Global Index Buffer
-        vkCmdBindIndexBuffer(cmd, GeomRegistry.gpuIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
-
-        int currentInstanceOffset = currentFrame * MAX_ENTITIES_PER_FRAME;
-
-        // 3. Issue the Instanced Draw Calls
-        for (int i = 0; i < snap.groupCount; i++) {
-            int indexCount = snap.groupIndexCounts[i];
-            int instanceCount = snap.groupInstanceCounts[i];
-            int firstIndex = snap.groupFirstIndex[i]; // Starts reading indices from exactly where this mesh lives
-
-            // Tell the shader where in the 30MB Mega-Buffer this group's entities start
-            VKShader.pushGlobalData(cmd, currentInstanceOffset);
-
-            // ONE JNI call per mesh group. (e.g., Draws all 50,000 foxes instantly).
-            vkCmdDrawIndexed(cmd, indexCount, instanceCount, firstIndex, 0, 0);
-
-            currentInstanceOffset += instanceCount;
-        }
     }
 
     private static void cleanupSwapchain() {
@@ -732,6 +705,11 @@ public class MasterRenderer {
     }
     public static long getCommandPool() {
         return commandPool;
+    }
+
+    public static long getMappedEntityPointer()
+    {
+        return mappedEntityPointer;
     }
 
     public static class Alloc

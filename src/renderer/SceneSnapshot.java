@@ -1,18 +1,21 @@
 package renderer;
 
+import org.lwjgl.system.MemoryUtil;
+
 public class SceneSnapshot {
     public boolean isOffscreen = false;
     public int containerId = -1;
     public int width = 0;
     public int height = 0;
     public float bgR, bgG, bgB, bgA;
+    public float[] vpMatrix = new float[16];
 
-    // --- THE 100K MEGA-BUFFER ---
+    // Allocate a raw off-heap block for this snapshot (supports up to 100k entities)
+    public long entityDataPtr = MemoryUtil.nmemAlloc(100000 * 96L);
+
+    public int globalEntityOffset = 0;
     public int entityCount = 0;
-    // 24 floats per entity. 100,000 entities = 2,400,000 floats (~9.6 MB)
-    public float[] entityData = new float[2_400_000];
 
-    // Track the groups so we can issue batched instanced draw calls
     public int[] groupFirstIndex = new int[4096];
     public int[] groupIndexCounts = new int[4096];
     public int[] groupInstanceCounts = new int[4096];
@@ -23,5 +26,10 @@ public class SceneSnapshot {
         groupCount = 0;
         isOffscreen = false;
         containerId = -1;
+        globalEntityOffset = 0;
+    }
+
+    public void destroy() {
+        MemoryUtil.nmemFree(entityDataPtr); // Prevent memory leaks on shutdown
     }
 }

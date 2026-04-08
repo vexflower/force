@@ -279,6 +279,31 @@ public class Mat4 {
         return this;
     }
 
+    // ========================================================================
+    // DIRECT NATIVE C-POINTER UPLOAD (Zero GC)
+    // ========================================================================
+    public void store(long ptr) {
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr,      m00);
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 4,  m01);
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 8,  m02);
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 12, m03);
+
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 16, m10);
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 20, m11);
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 24, m12);
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 28, m13);
+
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 32, m20);
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 36, m21);
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 40, m22);
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 44, m23);
+
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 48, m30);
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 52, m31);
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 56, m32);
+        org.lwjgl.system.MemoryUtil.memPutFloat(ptr + 60, m33);
+    }
+
     // Zero-allocation dump straight into a primitive float array
     public void store(float[] dest, int offset) {
         dest[offset]      = m00; dest[offset + 1]  = m01; dest[offset + 2]  = m02; dest[offset + 3]  = m03;

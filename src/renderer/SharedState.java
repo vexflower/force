@@ -4,7 +4,7 @@ public class SharedState {
 
     // Triple Buffering: Zero GC forever.
     private final RenderState[] states = new RenderState[] {
-            new RenderState(), new RenderState(), new RenderState()
+            new RenderState(0), new RenderState(1), new RenderState(2)
     };
 
     private int readIndex = 0;
