@@ -4,6 +4,8 @@ import hardware.VulkanContext;
 import hardware.Window;
 import lang.Mat4;
 import entity.Camera;
+import move.Move;
+import move.MoveType;
 
 public class Scene3D extends Scene {
 
@@ -13,7 +15,7 @@ public class Scene3D extends Scene {
     private float zNear = .1f;
     private float zFar = 10_000f;
     public boolean updatesCamera = true;
-    private Camera currentCamera;
+    Camera currentCamera;
 
     public Scene3D(int width, int height) {
         super(width, height);
@@ -48,13 +50,47 @@ public class Scene3D extends Scene {
     // ---> THE FIX: Inject the Camera Matrix into the Snapshot! <---
     @Override
     public void extract3DEntities(renderer.RenderState state) {
-        // Intercept the snapshot BEFORE the superclass increments the counter
         if (state.snapshotCount < state.snapshots.length) {
-            // Copy our 3D Camera matrix directly into the snapshot's float array
-            vpMatrix.store(state.snapshots[state.snapshotCount].vpMatrix, 0);
+            // Push Matrix natively to C-Memory!
+            vpMatrix.store(state.snapshots[state.snapshotCount].vpMatrix);
         }
-
-        // Now let the base Scene pack the entities as normal
         super.extract3DEntities(state);
+    }
+
+    // --- SCENE & CAMERA ANIMATION API ---
+
+    public void moveScene(int moveCurve, int moveType, float destX, float destY, float duration) {
+        int curve = duration == -1f ? Move.NORMAL : moveCurve;
+        float ex = moveType == MoveType.STUDS ? localX + destX : destX;
+        float ey = moveType == MoveType.STUDS ? localY + destY : destY;
+
+        // If infinite, we just pass the velocities in directly as the end targets
+        if (duration == -1f) { ex = destX; ey = destY; }
+
+        posMove.start(curve, localX, localY, 0, ex, ey, 0, duration);
+    }
+
+    public void moveCamera(int moveCurve, int moveType, float destX, float destY, float destZ, float duration) {
+        if (currentCamera == null) return;
+        int curve = duration == -1f ? Move.NORMAL : moveCurve;
+        float ex = moveType == MoveType.STUDS ? currentCamera.posX + destX : destX;
+        float ey = moveType == MoveType.STUDS ? currentCamera.posY + destY : destY;
+        float ez = moveType == MoveType.STUDS ? currentCamera.posZ + destZ : destZ;
+
+        if (duration == -1f) { ex = destX; ey = destY; ez = destZ; }
+
+        currentCamera.posMove.start(curve, currentCamera.posX, currentCamera.posY, currentCamera.posZ, ex, ey, ez, duration);
+    }
+
+    public void rotateCamera(int moveCurve, int moveType, float pitch, float yaw, float roll, float duration) {
+        if (currentCamera == null) return;
+        int curve = duration == -1f ? Move.NORMAL : moveCurve;
+        float ex = moveType == MoveType.STUDS ? currentCamera.rotX + pitch : pitch;
+        float ey = moveType == MoveType.STUDS ? currentCamera.rotY + yaw : yaw;
+        float ez = moveType == MoveType.STUDS ? currentCamera.rotZ + roll : roll;
+
+        if (duration == -1f) { ex = pitch; ey = yaw; ez = roll; }
+
+        currentCamera.rotMove.start(curve, currentCamera.rotX, currentCamera.rotY, currentCamera.rotZ, ex, ey, ez, duration);
     }
 }

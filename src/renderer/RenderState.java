@@ -1,4 +1,6 @@
 package renderer;
+import util.CFloatList;
+import util.CIntList;
 
 public class RenderState {
     public final int frameIndex;
@@ -6,10 +8,9 @@ public class RenderState {
     public SceneSnapshot[] snapshots = new SceneSnapshot[10];
 
     public int uiElementCount = 0;
-    public float[] uiTransforms = new float[1600];
-    public int[] uiTextureIds = new int[100];
+    public final CFloatList uiTransforms = new CFloatList(1600);
+    public final CIntList uiTextureIds = new CIntList(100);
 
-    // ---> NEW: Track total entities across ALL scenes to prevent memory overlap
     public int totalEntities = 0;
 
     public RenderState(int frameIndex) {
@@ -22,7 +23,17 @@ public class RenderState {
     public void clear() {
         snapshotCount = 0;
         uiElementCount = 0;
-        totalEntities = 0; // <--- Clear it!
+        totalEntities = 0;
+        uiTransforms.clear();
+        uiTextureIds.clear();
         for (int i = 0; i < snapshots.length; i++) snapshots[i].clear();
     }
+
+    public void free() {
+        uiTransforms.free();
+        uiTextureIds.free();
+        for (int i = 0; i < snapshots.length; i++) snapshots[i].free();
+    }
 }
+
+

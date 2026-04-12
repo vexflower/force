@@ -1,6 +1,6 @@
 package loader;
 
-import model.Mesh;
+import mesh.Mesh;
 import java.util.HashMap;
 import java.util.Map;
 

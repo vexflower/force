@@ -36,9 +36,13 @@ public class GameEngine {
 
         MasterRenderer.destroy();
         MeshLoader.destroy();
-        loader.GeomRegistry.destroy(); // <--- THE FIX: Clean up the Geometry Mega-Buffers!
+        loader.GeomRegistry.destroy();
         TextureRegistry.destroy();
-        VulkanContext.destroy(); // <--- Added Context Cleanup
+
+        environment.RendererManager.destroy();
+        sharedState.destroy();
+
+        VulkanContext.destroy();
         Window.destroy();
     }
 

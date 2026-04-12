@@ -3,8 +3,7 @@ package renderer;
 import hardware.VulkanContext;
 import hardware.Window;
 import loader.GeomRegistry;
-import loader.MeshLoader;
-import model.Mesh;
+import mesh.Mesh;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.system.MemoryStack;
@@ -61,6 +60,12 @@ public class MasterRenderer {
     private static long globalEntityMemory;
     private static long mappedEntityPointer; // Persistent CPU pointer to the GPU RAM
 
+    public static final int MAX_COMMANDS_PER_FRAME = 10000;
+    private static long globalIndirectBuffer;
+    private static long globalIndirectMemory;
+    private static long mappedIndirectPointer;
+    private static int currentCommandOffset = 0;
+
     public static void setRenderer()
     {
         System.out.println("Initializing Vulkan Master Renderer...");
@@ -77,6 +82,14 @@ public class MasterRenderer {
         initRenderLoopStructs();
         // Create it as HOST_VISIBLE so Java can memCopy straight into it
         globalEntityBuffer = VK.createBuffer(ENTITY_BUFFER_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        globalIndirectBuffer = VK.createBuffer(MAX_COMMANDS_PER_FRAME * 20L * MAX_FRAMES_IN_FLIGHT, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
+        globalIndirectMemory = VK.allocateBufferMemory(globalIndirectBuffer, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        try (MemoryStack stack = stackPush()) {
+            PointerBuffer pData = stack.mallocPointer(1);
+            vkMapMemory(VulkanContext.getDevice(), globalIndirectMemory, 0, VK_WHOLE_SIZE, 0, pData);
+            mappedIndirectPointer = pData.get(0);
+        }
         globalEntityMemory = VK.allocateBufferMemory(globalEntityBuffer, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
         try (MemoryStack stack = stackPush()) {
@@ -407,6 +420,7 @@ public class MasterRenderer {
     }
 
     public static void render(RenderState state) {
+        currentCommandOffset = 0; // <--- Reset per frame!
         VkDevice device = VulkanContext.getDevice();
         vkWaitForFences(device, inFlightFences[currentFrame], true, -1);
 
@@ -498,11 +512,14 @@ public class MasterRenderer {
                 vkCmdBindIndexBuffer(commandBuffers[currentFrame], GeomRegistry.gpuIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
                 for (int i = 0; i < state.uiElementCount; i++) {
-                    int containerId = state.uiTextureIds[i];
+                    int containerId = state.uiTextureIds.get(i);
                     int actualTexId = renderTargets[containerId] != null ? renderTargets[containerId].textureId : 0;
 
-                    VKShader.pushUIState(commandBuffers[currentFrame], state.uiTransforms, i * 16, actualTexId, Mesh.SQUARE.vertexOffset, (float)Window.getWidth(), (float)Window.getHeight());
-                    vkCmdDrawIndexed(commandBuffers[currentFrame], Mesh.SQUARE.indexCount, 1, Mesh.SQUARE.firstIndex, 0, 0);
+                    // Calculate the exact C-Pointer for this matrix
+                    long matrixAddress = state.uiTransforms.address() + (i * 16L * 4L);
+
+                    VKShader.pushUIState(commandBuffers[currentFrame], matrixAddress, actualTexId, Mesh.SQUARE.lodVertexOffsets[0], (float)Window.getWidth(), (float)Window.getHeight());
+                    vkCmdDrawIndexed(commandBuffers[currentFrame], Mesh.SQUARE.lodIndexCounts[0], 1, Mesh.SQUARE.lodFirstIndices[0], 0, 0);
                 }
             }
         }
@@ -533,35 +550,28 @@ public class MasterRenderer {
     }
 
     // THE FIX: Accept stateFrameIndex as a parameter!
+    // ... [Replace drawSnapshotEntities entirely] ...
     private static int drawSnapshotEntities(VkCommandBuffer cmd, SceneSnapshot snap, int ssboOffset, int stateFrameIndex) {
-        if (snap.entityCount == 0) return ssboOffset;
+        if (snap.commandCount == 0) return ssboOffset + snap.entityCount;
 
-        // 1. Calculate safe GPU pointers using the Logic Thread's frame index
         long frameOffsetBytes = (long) stateFrameIndex * MAX_ENTITIES_PER_FRAME * 96L;
         long snapshotOffsetBytes = (long) ssboOffset * 96L;
-        long gpuDestPtr = mappedEntityPointer + frameOffsetBytes + snapshotOffsetBytes;
 
-        // 2. FAST NATIVE COPY: Transfer isolated snapshot memory directly to Vulkan mapped memory
-        org.lwjgl.system.MemoryUtil.memCopy(snap.entityDataPtr, gpuDestPtr, snap.entityCount * 96L);
+        // 1. FAST NATIVE COPY: Entity Data -> GPU SSBO
+        MemoryUtil.memCopy(snap.entityData.address(), mappedEntityPointer + frameOffsetBytes + snapshotOffsetBytes, snap.entityCount * 24L * 4L);
+
+        // 2. FAST NATIVE COPY: Command Array -> GPU MDI Buffer
+        long indirectByteOffset = (stateFrameIndex * MAX_COMMANDS_PER_FRAME * 20L) + (currentCommandOffset * 20L);
+        MemoryUtil.memCopy(snap.indirectData.address(), mappedIndirectPointer + indirectByteOffset, snap.commandCount * 5L * 4L);
 
         vkCmdBindIndexBuffer(cmd, GeomRegistry.gpuIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-        // Tell the shader exactly where in the SSBO to start reading.
-        // CRITICAL: Must use stateFrameIndex, NOT currentFrame!
         int currentInstanceOffset = (stateFrameIndex * MAX_ENTITIES_PER_FRAME) + ssboOffset;
+        VKShader.pushGlobalData(cmd, currentInstanceOffset, snap.vpMatrix.address());
 
-        for (int i = 0; i < snap.groupCount; i++) {
-            int indexCount = snap.groupIndexCounts[i];
-            int instanceCount = snap.groupInstanceCounts[i];
-            int firstIndex = snap.groupFirstIndex[i];
+        vkCmdDrawIndexedIndirect(cmd, globalIndirectBuffer, indirectByteOffset, snap.commandCount, 20);
 
-            // Push the Camera matrix and issue the draw call
-            VKShader.pushGlobalData(cmd, currentInstanceOffset, snap.vpMatrix);
-            vkCmdDrawIndexed(cmd, indexCount, instanceCount, firstIndex, 0, 0);
-
-            currentInstanceOffset += instanceCount;
-        }
-
+        currentCommandOffset += snap.commandCount;
         return ssboOffset + snap.entityCount;
     }
 
@@ -661,7 +671,7 @@ public class MasterRenderer {
     }
 
     public static void destroy() {
-       VkDevice device = VulkanContext.getDevice();
+        VkDevice device = VulkanContext.getDevice();
         if (device != null) {
             vkDeviceWaitIdle(device);
 
@@ -678,10 +688,15 @@ public class MasterRenderer {
                 vkDestroyDescriptorSetLayout(device, VKShader.bindlessDescriptorSetLayout, null);
             }
 
-            // --- THE FIX: Clean up the 28MB Entity Mega-Buffer! ---
+            // --- THE FIX: Clean up the Entity Mega-Buffer AND the Indirect Buffer! ---
             if (globalEntityBuffer != VK_NULL_HANDLE) {
                 vkDestroyBuffer(device, globalEntityBuffer, null);
                 vkFreeMemory(device, globalEntityMemory, null);
+            }
+
+            if (globalIndirectBuffer != VK_NULL_HANDLE) {
+                vkDestroyBuffer(device, globalIndirectBuffer, null);
+                vkFreeMemory(device, globalIndirectMemory, null);
             }
             // ------------------------------------------------------
 

@@ -318,33 +318,44 @@ public final class VKShader {
         vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, PUSH_CONSTANT_BUFFER);
     }
 
-    public static void pushGlobalData(VkCommandBuffer cmd, int currentInstanceOffset) {
+    // Notice the parameter is now 'long matrixPtr'
+    public static void pushUIState(VkCommandBuffer cmd, long matrixPtr, int texId, int vertexOffset, float screenW, float screenH) {
         PUSH_CONSTANT_BUFFER.clear();
-        for (int i = 0; i < 16; i++) PUSH_CONSTANT_BUFFER.put(0f); // Blank Matrix
 
+        // DIRECT C-TO-C COPY. The JVM is entirely bypassed.
+        MemoryUtil.memCopy(matrixPtr, MemoryUtil.memAddress(PUSH_CONSTANT_BUFFER), 16 * 4L);
+
+        // Set the float buffer position to 16 since we just manually blasted 16 floats into its backing memory
+        PUSH_CONSTANT_BUFFER.position(16);
+
+        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(1));
+        PUSH_CONSTANT_BUFFER.put(0f);
+        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(vertexOffset));
+        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(texId));
+        PUSH_CONSTANT_BUFFER.put(screenW);
+        PUSH_CONSTANT_BUFFER.put(screenH);
+        PUSH_CONSTANT_BUFFER.put(0f);
+        PUSH_CONSTANT_BUFFER.put(0f);
+
+        PUSH_CONSTANT_BUFFER.flip();
+        vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, PUSH_CONSTANT_BUFFER);
+    }
+
+    // Update pushGlobalData to also use 'long matrixPtr'
+    public static void pushGlobalData(VkCommandBuffer cmd, int currentInstanceOffset, long matrixPtr) {
+        PUSH_CONSTANT_BUFFER.clear();
+
+        // Fast C-Memory Matrix Copy
+        MemoryUtil.memCopy(matrixPtr, MemoryUtil.memAddress(PUSH_CONSTANT_BUFFER), 16 * 4L);
+        PUSH_CONSTANT_BUFFER.position(16);
+
+        // Push the rest of the struct data
         PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(0)); // Type 0 = 3D Entity
         PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(currentInstanceOffset));
         PUSH_CONSTANT_BUFFER.put(0f); // Vertex Offset (Unused in 3D)
         PUSH_CONSTANT_BUFFER.put(0f); // Texture ID (Unused in 3D)
         PUSH_CONSTANT_BUFFER.put(0f); // Screen X
         PUSH_CONSTANT_BUFFER.put(0f); // Screen Y
-        PUSH_CONSTANT_BUFFER.put(0f); // Pad
-        PUSH_CONSTANT_BUFFER.put(0f); // Pad
-
-        PUSH_CONSTANT_BUFFER.flip();
-        vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, PUSH_CONSTANT_BUFFER);
-    }
-
-    public static void pushUIState(VkCommandBuffer cmd, float[] matrixData, int matrixOffset, int texId, int vertexOffset, float screenW, float screenH) {
-        PUSH_CONSTANT_BUFFER.clear();
-        PUSH_CONSTANT_BUFFER.put(matrixData, matrixOffset, 16); // The UI Matrix
-
-        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(1)); // Type 1 = UI
-        PUSH_CONSTANT_BUFFER.put(0f); // Instance Offset (Unused in UI)
-        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(vertexOffset));
-        PUSH_CONSTANT_BUFFER.put(Float.intBitsToFloat(texId));
-        PUSH_CONSTANT_BUFFER.put(screenW);
-        PUSH_CONSTANT_BUFFER.put(screenH);
         PUSH_CONSTANT_BUFFER.put(0f); // Pad
         PUSH_CONSTANT_BUFFER.put(0f); // Pad
 

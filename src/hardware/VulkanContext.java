@@ -170,7 +170,7 @@ public class VulkanContext {
                         .queueFamilyIndex(uniqueQueueFamilies[i]).pQueuePriorities(stack.floats(1.0f));
             }
 
-            VkPhysicalDeviceFeatures deviceFeatures = VkPhysicalDeviceFeatures.calloc(stack);
+            VkPhysicalDeviceFeatures deviceFeatures = VkPhysicalDeviceFeatures.calloc(stack).multiDrawIndirect(true);
 
             // Bindless Features required by the Ubershader
             VkPhysicalDeviceVulkan12Features bindlessFeatures = VkPhysicalDeviceVulkan12Features.calloc(stack)

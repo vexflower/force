@@ -1,7 +1,5 @@
 package lang;
 
-import util.FloatList;
-
 import java.nio.FloatBuffer;
 
 /**
@@ -305,26 +303,12 @@ public class Mat4 {
     }
 
     // Zero-allocation dump straight into a primitive float array
-    public void store(float[] dest, int offset) {
-        dest[offset]      = m00; dest[offset + 1]  = m01; dest[offset + 2]  = m02; dest[offset + 3]  = m03;
-        dest[offset + 4]  = m10; dest[offset + 5]  = m11; dest[offset + 6]  = m12; dest[offset + 7]  = m13;
-        dest[offset + 8]  = m20; dest[offset + 9]  = m21; dest[offset + 10] = m22; dest[offset + 11] = m23;
-        dest[offset + 12] = m30; dest[offset + 13] = m31; dest[offset + 14] = m32; dest[offset + 15] = m33;
-    }
-
-    // ========================================================================
-    // [CHANGED: ZERO-ALLOCATION SCENE DUMPING]
-    // ========================================================================
-    // [FIXED: ZERO-ALLOCATION SCENE DUMPING]
-    public Mat4 storeIntoFloatList(util.FloatList list, int offset) {
-        // Vulkan Column 0
-        list.set(offset, m00); list.set(offset + 1, m01); list.set(offset + 2, m02); list.set(offset + 3, m03);
-        // Vulkan Column 1
-        list.set(offset + 4, m10); list.set(offset + 5, m11); list.set(offset + 6, m12); list.set(offset + 7, m13);
-        // Vulkan Column 2
-        list.set(offset + 8, m20); list.set(offset + 9, m21); list.set(offset + 10, m22); list.set(offset + 11, m23);
-        // Vulkan Column 3 (Translation & W-Divide)
-        list.set(offset + 12, m30); list.set(offset + 13, m31); list.set(offset + 14, m32); list.set(offset + 15, m33);
+    // ... [Inside Mat4.java, add this:] ...
+    public Mat4 store(util.CFloatList list) {
+        list.add(m00); list.add(m01); list.add(m02); list.add(m03);
+        list.add(m10); list.add(m11); list.add(m12); list.add(m13);
+        list.add(m20); list.add(m21); list.add(m22); list.add(m23);
+        list.add(m30); list.add(m31); list.add(m32); list.add(m33);
         return this;
     }
 

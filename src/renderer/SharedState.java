@@ -40,4 +40,10 @@ public class SharedState {
             }
         }
     }
+
+    public void destroy() {
+        for (RenderState state : states) {
+            state.free();
+        }
+    }
 }

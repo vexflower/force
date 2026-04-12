@@ -2,69 +2,33 @@ package loader;
 
 import hardware.VulkanContext;
 import org.lwjgl.vulkan.VkDevice;
-
+import util.CLongList;
 import static org.lwjgl.vulkan.VK10.*;
 
-/**
- * Tracks raw Vulkan memory handles for textures and maps them to a simple Integer ID.
- */
 public class TextureRegistry {
-
-    // Store the 64-bit Vulkan pointers
-    private static long[] images = new long[1024];
-    private static long[] memories = new long[1024];
-    private static long[] views = new long[1024];
-    private static long[] samplers = new long[1024];
-
-    private static int count = 0;
+    // Pure C-Memory Trackers
+    private static final CLongList images = new CLongList(1024);
+    private static final CLongList memories = new CLongList(1024);
+    private static final CLongList views = new CLongList(1024);
+    private static final CLongList samplers = new CLongList(1024);
 
     public static int add(long image, long memory, long view, long sampler) {
-        if (count == images.length) {
-            expand();
-        }
-
-        int id = count;
-        images[id] = image;
-        memories[id] = memory;
-        views[id] = view;
-        samplers[id] = sampler;
-
-        count++;
+        int id = images.size();
+        images.add(image);
+        memories.add(memory);
+        views.add(view);
+        samplers.add(sampler);
         return id;
     }
 
-    private static void expand() {
-        int newSize = images.length * 2;
-
-        long[] newImages = new long[newSize];
-        System.arraycopy(images, 0, newImages, 0, count);
-        images = newImages;
-
-        long[] newMemories = new long[newSize];
-        System.arraycopy(memories, 0, newMemories, 0, count);
-        memories = newMemories;
-
-        long[] newViews = new long[newSize];
-        System.arraycopy(views, 0, newViews, 0, count);
-        views = newViews;
-
-        long[] newSamplers = new long[newSize];
-        System.arraycopy(samplers, 0, newSamplers, 0, count);
-        samplers = newSamplers;
-    }
-
-    /**
-     * Called during engine shutdown to prevent memory leaks.
-     */
     public static void destroy() {
         VkDevice device = VulkanContext.getDevice();
-        // Assuming your arrays are named this based on the add() method
-        for (int i = 0; i < count; i++) {
-            vkDestroySampler(device, samplers[i], null);
-            vkDestroyImageView(device, views[i], null);
-            vkDestroyImage(device, images[i], null);
-            vkFreeMemory(device, memories[i], null);
+        for (int i = 0; i < images.size(); i++) {
+            vkDestroySampler(device, samplers.get(i), null);
+            vkDestroyImageView(device, views.get(i), null);
+            vkDestroyImage(device, images.get(i), null);
+            vkFreeMemory(device, memories.get(i), null);
         }
-        count = 0;
+        images.free(); memories.free(); views.free(); samplers.free();
     }
 }

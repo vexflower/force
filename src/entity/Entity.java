@@ -3,8 +3,8 @@ package entity;
 import environment.RendererManager;
 import lang.GeomMath;
 import lang.Mat4;
-import model.Material;
-import model.Mesh;
+import mesh.Material;
+import mesh.Mesh;
 import move.Move;
 import move.MoveType;
 

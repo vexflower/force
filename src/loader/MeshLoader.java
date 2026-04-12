@@ -1,36 +1,32 @@
 package loader;
 
-import model.Mesh;
+import mesh.Mesh;
+import mesh.MeshDecimator;
+import mesh.MeshOptimizer;
 import org.lwjgl.assimp.AIFace;
 import org.lwjgl.assimp.AIMesh;
 import org.lwjgl.assimp.AIScene;
 import org.lwjgl.assimp.AIVector3D;
-import org.lwjgl.vulkan.*;
+import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
 
 /**
  * High-performance Vulkan MeshLoader.
- * Replaces OpenGL VAOs/VBOs with Vulkan VkBuffers and Staging memory.
+ * Reads from Assimp into temporary arrays, interleaves directly to C-Memory,
+ * then triggers Procedural LOD generation.
  */
 public final class MeshLoader {
 
     private static int meshCount = 0;
 
-    /**
-     * Replaces the old Vulkan VAO/VBO logic.
-     * Simply dumps the parsed mesh into the Global Registry.
-     */
     public static void loadMesh(Mesh mesh) {
         GeomRegistry.appendMesh(mesh);
         mesh.vaoId = meshCount++;
-
-        // Auto-Register everything instantly!
         MeshRegistry.register(mesh.name, mesh);
     }
 
     public static void destroy() {
-        // Nothing to do here anymore! GlobalGeometryRegistry handles cleanup.
         meshCount = 0;
     }
 
@@ -42,17 +38,16 @@ public final class MeshLoader {
 
         ByteBuffer fileBuffer = resources.Resources.streamToOffHeap(path);
 
-        // [THE MAGIC BULLET]: We tell Assimp to convert everything to your Left-Handed rule automatically!
         int flags = org.lwjgl.assimp.Assimp.aiProcess_Triangulate |
                 org.lwjgl.assimp.Assimp.aiProcess_JoinIdenticalVertices |
                 org.lwjgl.assimp.Assimp.aiProcess_CalcTangentSpace |
                 org.lwjgl.assimp.Assimp.aiProcess_GenSmoothNormals |
-                org.lwjgl.assimp.Assimp.aiProcess_MakeLeftHanded; // <--- ADDED
+                org.lwjgl.assimp.Assimp.aiProcess_MakeLeftHanded;
 
         AIScene scene = org.lwjgl.assimp.Assimp.aiImportFileFromMemory(fileBuffer, flags, (CharSequence) "");
 
         if (scene == null || scene.mMeshes() == null) {
-            org.lwjgl.system.MemoryUtil.memFree(fileBuffer);
+            MemoryUtil.memFree(fileBuffer);
             throw new RuntimeException("Assimp failed to parse: " + org.lwjgl.assimp.Assimp.aiGetErrorString());
         }
 
@@ -60,22 +55,24 @@ public final class MeshLoader {
         int vertexCount = aiMesh.mNumVertices();
 
         Mesh mesh = new Mesh(meshName);
-        mesh.positions = new float[vertexCount * 3];
-        mesh.textures = new float[vertexCount * 2];
-        mesh.normals = new float[vertexCount * 3];
+
+        // THE FIX: Use local temporary arrays, NOT mesh.positions
+        float[] rawPositions = new float[vertexCount * 3];
+        float[] rawTextures = new float[vertexCount * 2];
+        float[] rawNormals = new float[vertexCount * 3];
 
         // --- 1. EXTRACT AND SWIZZLE VERTICES ---
         AIVector3D.Buffer aiVertices = aiMesh.mVertices();
         for (int i = 0; i < vertexCount; i++) {
             AIVector3D v = aiVertices.get(i);
-            mesh.positions[i * 3] = v.x();
+            rawPositions[i * 3] = v.x();
 
             if (isZUp) {
-                mesh.positions[i * 3 + 1] = -v.z();
-                mesh.positions[i * 3 + 2] = v.y();
+                rawPositions[i * 3 + 1] = -v.z();
+                rawPositions[i * 3 + 2] = v.y();
             } else {
-                mesh.positions[i * 3 + 1] = v.y();
-                mesh.positions[i * 3 + 2] = v.z();
+                rawPositions[i * 3 + 1] = v.y();
+                rawPositions[i * 3 + 2] = v.z();
             }
         }
 
@@ -84,14 +81,14 @@ public final class MeshLoader {
         if (aiNormals != null) {
             for (int i = 0; i < vertexCount; i++) {
                 AIVector3D n = aiNormals.get(i);
-                mesh.normals[i * 3] = n.x();
+                rawNormals[i * 3] = n.x();
 
                 if (isZUp) {
-                    mesh.normals[i * 3 + 1] = -n.z();
-                    mesh.normals[i * 3 + 2] = n.y();
+                    rawNormals[i * 3 + 1] = -n.z();
+                    rawNormals[i * 3 + 2] = n.y();
                 } else {
-                    mesh.normals[i * 3 + 1] = n.y();
-                    mesh.normals[i * 3 + 2] = n.z();
+                    rawNormals[i * 3 + 1] = n.y();
+                    rawNormals[i * 3 + 2] = n.z();
                 }
             }
         }
@@ -100,9 +97,8 @@ public final class MeshLoader {
         if (texCoords != null) {
             for (int i = 0; i < vertexCount; i++) {
                 AIVector3D t = texCoords.get(i);
-
-                mesh.textures[i * 2] = t.x();
-                mesh.textures[i * 2 + 1] = flipUV ? (1.0f - t.y()) : t.y();
+                rawTextures[i * 2] = t.x();
+                rawTextures[i * 2 + 1] = flipUV ? (1.0f - t.y()) : t.y();
             }
         }
 
@@ -112,11 +108,11 @@ public final class MeshLoader {
         float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, minZ = Float.MAX_VALUE;
         float maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
 
-        // Step A: Find the extreme bounding box limits of the raw model
+        // Step A: Find bounding box
         for (int i = 0; i < vertexCount; i++) {
-            float x = mesh.positions[i * 3];
-            float y = mesh.positions[i * 3 + 1];
-            float z = mesh.positions[i * 3 + 2];
+            float x = rawPositions[i * 3];
+            float y = rawPositions[i * 3 + 1];
+            float z = rawPositions[i * 3 + 2];
 
             if (x < minX) minX = x;
             if (y < minY) minY = y;
@@ -126,7 +122,6 @@ public final class MeshLoader {
             if (z > maxZ) maxZ = z;
         }
 
-        // Step B: Calculate the exact center point and the longest dimension
         float centerX = (minX + maxX) / 2.0f;
         float centerY = (minY + maxY) / 2.0f;
         float centerZ = (minZ + maxZ) / 2.0f;
@@ -135,37 +130,59 @@ public final class MeshLoader {
         float sizeY = maxY - minY;
         float sizeZ = maxZ - minZ;
 
-        // Find the absolute largest side of the bounding box
         float maxDimension = Math.max(sizeX, Math.max(sizeY, sizeZ));
-        if (maxDimension == 0) maxDimension = 1.0f; // Prevent division by zero
+        if (maxDimension == 0) maxDimension = 1.0f;
 
-        // Step C: Shift the model to the absolute Origin (0,0,0) and scale it to 1.0
+        // Step C: Allocate Off-Heap memory for LOD 0 (8 floats per vertex)
+        mesh.lodVertexCounts[0] = vertexCount;
+        mesh.lodVertexPtrs[0] = MemoryUtil.nmemAlloc(vertexCount * 8L * 4L);
+        mesh.lodDistancesSq[0] = 0f;
+
+        // Interleave and normalize directly into C-memory!
         for (int i = 0; i < vertexCount; i++) {
-            mesh.positions[i * 3]     = (mesh.positions[i * 3] - centerX) / maxDimension;
-            mesh.positions[i * 3 + 1] = (mesh.positions[i * 3 + 1] - centerY) / maxDimension;
-            mesh.positions[i * 3 + 2] = (mesh.positions[i * 3 + 2] - centerZ) / maxDimension;
-        }
-        // ====================================================================
+            long vPtr = mesh.lodVertexPtrs[0] + (i * 8L * 4L);
 
+            // Positions (Normalized)
+            float nx = (rawPositions[i * 3] - centerX) / maxDimension;
+            float ny = (rawPositions[i * 3 + 1] - centerY) / maxDimension;
+            float nz = (rawPositions[i * 3 + 2] - centerZ) / maxDimension;
+            MemoryUtil.memPutFloat(vPtr, nx);
+            MemoryUtil.memPutFloat(vPtr + 4, ny);
+            MemoryUtil.memPutFloat(vPtr + 8, nz);
+
+            // Textures
+            MemoryUtil.memPutFloat(vPtr + 12, rawTextures[i * 2]);
+            MemoryUtil.memPutFloat(vPtr + 16, rawTextures[i * 2 + 1]);
+
+            // Normals
+            MemoryUtil.memPutFloat(vPtr + 20, rawNormals[i * 3]);
+            MemoryUtil.memPutFloat(vPtr + 24, rawNormals[i * 3 + 1]);
+            MemoryUtil.memPutFloat(vPtr + 28, rawNormals[i * 3 + 2]);
+        }
+
+        // Extract Indices directly to Off-Heap
         int faceCount = aiMesh.mNumFaces();
         AIFace.Buffer faces = aiMesh.mFaces();
-        mesh.indices = new int[faceCount * 3];
 
-        int indexCount = 0;
+        mesh.lodIndexCounts[0] = faceCount * 3;
+        mesh.lodIndexPtrs[0] = MemoryUtil.nmemAlloc(mesh.lodIndexCounts[0] * 4L);
+
+        int indexOffset = 0;
         for (int i = 0; i < faceCount; i++) {
             AIFace face = faces.get(i);
             if (face.mNumIndices() == 3) {
-                mesh.indices[indexCount++] = face.mIndices().get(0);
-                mesh.indices[indexCount++] = face.mIndices().get(1);
-                mesh.indices[indexCount++] = face.mIndices().get(2);
+                MemoryUtil.memPutInt(mesh.lodIndexPtrs[0] + (indexOffset++ * 4L), face.mIndices().get(0));
+                MemoryUtil.memPutInt(mesh.lodIndexPtrs[0] + (indexOffset++ * 4L), face.mIndices().get(1));
+                MemoryUtil.memPutInt(mesh.lodIndexPtrs[0] + (indexOffset++ * 4L), face.mIndices().get(2));
             }
         }
 
         org.lwjgl.assimp.Assimp.aiReleaseImport(scene);
-        org.lwjgl.system.MemoryUtil.memFree(fileBuffer);
+        MemoryUtil.memFree(fileBuffer);
 
-        loadMesh(mesh); // Pushes it to the Bindless Registry!
+        MeshOptimizer.generateLODs(mesh);
+
+        loadMesh(mesh);
         return mesh;
     }
-
 }

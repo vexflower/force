@@ -7,7 +7,7 @@ import hardware.Window;
 import loader.MeshLoader;
 import loader.MeshRegistry;
 import loader.TextureLoader;
-import model.Mesh;
+import mesh.Mesh;
 import move.Move;
 import move.MoveType;
 import renderer.MasterRenderer;
@@ -72,7 +72,7 @@ public class Main {
         // Replace the old ent setup with this:
         Entity ent = new Entity(MeshRegistry.get("fox"), foxTex);
         ent.setPosition(0, 200f, 200f); // Start way up in the air
-        ent.scale = 30f;
+        ent.scale = 50f;
         scene.addEntity(ent);
 
         // Tell the engine to drop it to Y=20 over 2 seconds using a bouncy curve

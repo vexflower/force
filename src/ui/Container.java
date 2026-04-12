@@ -2,6 +2,7 @@ package ui;
 
 import lang.Mat4;
 import lang.GeomMath;
+import move.Move;
 import renderer.RenderState;
 import util.FastList;
 
@@ -23,6 +24,11 @@ public class Container {
     // --- PURE DATA FLAGS (No Vulkan imports!) ---
     public boolean requiresOffscreen = false;
     public float bgR = 0f, bgG = 0f, bgB = 0f, bgA = 0f;
+
+    // --- ZERO-GC PRE-ALLOCATED COMPONENTS ---
+    public final Move posMove = new Move();
+    public final Move rotMove = new Move();
+    public final Move scaleMove = new Move();
 
     public Container() { this(0, 0); }
 
@@ -56,6 +62,50 @@ public class Container {
     protected void onResize(int w, int h) {}
 
     public void update(float delta) {
+        // Update Position
+        if (posMove.active) {
+            if (posMove.duration == -1f) {
+                // Infinite velocity movement
+                this.localX += posMove.endX * delta;
+                this.localY += posMove.endY * delta;
+                isDirty = true;
+            } else {
+                posMove.time += delta;
+                float t = Math.min(posMove.time / posMove.duration, 1.0f);
+                float eased = posMove.getEased(t);
+                this.localX = posMove.startX + (posMove.endX - posMove.startX) * eased;
+                this.localY = posMove.startY + (posMove.endY - posMove.startY) * eased;
+                isDirty = true;
+                if (t >= 1.0f) posMove.active = false;
+            }
+        }
+
+        // Update Rotation
+        if (rotMove.active) {
+            if (rotMove.duration == -1f) {
+                this.rotation += rotMove.endX * delta;
+                isDirty = true;
+            } else {
+                rotMove.time += delta;
+                float t = Math.min(rotMove.time / rotMove.duration, 1.0f);
+                float eased = rotMove.getEased(t);
+                this.rotation = rotMove.startX + (rotMove.endX - rotMove.startX) * eased;
+                isDirty = true;
+                if (t >= 1.0f) rotMove.active = false;
+            }
+        }
+
+        // Update Scale
+        if (scaleMove.active) {
+            scaleMove.time += delta;
+            float t = Math.min(scaleMove.time / scaleMove.duration, 1.0f);
+            float eased = scaleMove.getEased(t);
+            this.scaleX = scaleMove.startX + (scaleMove.endX - scaleMove.startX) * eased;
+            this.scaleY = scaleMove.startY + (scaleMove.endY - scaleMove.startY) * eased;
+            isDirty = true;
+            if (t >= 1.0f) scaleMove.active = false;
+        }
+
         for (int i = 0; i < children.size(); i++) {
             children.get(i).update(delta);
         }
@@ -97,12 +147,10 @@ public class Container {
     }
 
     public void extractUIData(RenderState state) {
-        // If this container requires an FBO, queue it to be drawn as a 2D UI Sprite!
         if (this.requiresOffscreen && state.uiElementCount < 100) {
-            int index = state.uiElementCount++;
-            // We pass the unique Container ID to the renderer so it knows WHICH generated texture to bind
-            state.uiTextureIds[index] = this.id;
-            this.renderTransform.store(state.uiTransforms, index * 16);
+            state.uiElementCount++;
+            state.uiTextureIds.add(this.id);
+            this.renderTransform.store(state.uiTransforms);
         }
         for (int i = 0; i < children.size(); i++) {
             children.get(i).extractUIData(state);

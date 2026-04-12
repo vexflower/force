@@ -1,4 +1,4 @@
-package model;
+package mesh;
 
 public class Material {
     // 0 means no texture assigned

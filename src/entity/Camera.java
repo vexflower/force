@@ -4,6 +4,7 @@ import hardware.Keyboard;
 import hardware.Mouse;
 import lang.Mat4;
 import lang.GeomMath;
+import move.Move;
 
 public class Camera {
     public float posX, posY, posZ;
@@ -18,6 +19,9 @@ public class Camera {
     private float lastMouseY = -1;
     private boolean firstMouse = true;
     private boolean isCameraMoveable = true;
+    // --- ZERO-GC PRE-ALLOCATED COMPONENTS ---
+    public final Move posMove = new Move();
+    public final Move rotMove = new Move();
 
     public Camera() {
         updateViewMatrix();
@@ -34,83 +38,92 @@ public class Camera {
     }
 
     public void move(float deltaTime) {
-        if(!isCameraMoveable) return;
+        boolean matrixNeedsUpdate = false;
 
-        float distance = WALK_SPEED * deltaTime;
+        // Process Automated Position
+        if (posMove.active) {
+            if (posMove.duration == -1f) {
+                posX += posMove.endX * deltaTime;
+                posY += posMove.endY * deltaTime;
+                posZ += posMove.endZ * deltaTime;
+                matrixNeedsUpdate = true;
+            } else {
+                posMove.time += deltaTime;
+                float t = Math.min(posMove.time / posMove.duration, 1.0f);
+                float eased = posMove.getEased(t);
+                this.posX = posMove.startX + (posMove.endX - posMove.startX) * eased;
+                this.posY = posMove.startY + (posMove.endY - posMove.startY) * eased;
+                this.posZ = posMove.startZ + (posMove.endZ - posMove.startZ) * eased;
+                matrixNeedsUpdate = true;
+                if (t >= 1.0f) posMove.active = false;
+            }
+        }
+
+        // Process Automated Rotation
+        if (rotMove.active) {
+            if (rotMove.duration == -1f) {
+                rotX += rotMove.endX * deltaTime;
+                rotY += rotMove.endY * deltaTime;
+                rotZ += rotMove.endZ * deltaTime;
+                matrixNeedsUpdate = true;
+            } else {
+                rotMove.time += deltaTime;
+                float t = Math.min(rotMove.time / rotMove.duration, 1.0f);
+                float eased = rotMove.getEased(t);
+                this.rotX = rotMove.startX + (rotMove.endX - rotMove.startX) * eased;
+                this.rotY = rotMove.startY + (rotMove.endY - rotMove.startY) * eased;
+                this.rotZ = rotMove.startZ + (rotMove.endZ - rotMove.startZ) * eased;
+                matrixNeedsUpdate = true;
+                if (t >= 1.0f) rotMove.active = false;
+            }
+        }
+
+        // Process Manual Input
+        if (isCameraMoveable && handleManualInput(deltaTime)) {
+            matrixNeedsUpdate = true;
+        }
+
+        if (matrixNeedsUpdate) {
+            updateViewMatrix();
+        }
+    }
+
+    // Extracted the big keyboard block into a cleaner helper method
+    private boolean handleManualInput(float distance) {
+        distance *= WALK_SPEED;
         boolean moved = false;
 
         float mouseX = Mouse.getX();
         float mouseY = Mouse.getY();
 
         if (Mouse.isButtonDown(Mouse.RIGHT)) {
-            if (firstMouse) {
-                lastMouseX = mouseX;
-                lastMouseY = mouseY;
-                firstMouse = false;
-            }
-
+            if (firstMouse) { lastMouseX = mouseX; lastMouseY = mouseY; firstMouse = false; }
             float dx = mouseX - lastMouseX;
             float dy = mouseY - lastMouseY;
-
-            // [FIXED] Standard FPS Mouse Mapping
             rotY += dx * MOUSE_SENSITIVITY;
             rotX += dy * MOUSE_SENSITIVITY;
-
             if (rotX > 89.0f) rotX = 89.0f;
             if (rotX < -89.0f) rotX = -89.0f;
-
             moved = true;
         } else {
             firstMouse = true;
         }
+        lastMouseX = mouseX; lastMouseY = mouseY;
 
-        lastMouseX = mouseX;
-        lastMouseY = mouseY;
-
-        // --- DIRECTIONAL KEYBOARD MOVEMENT ---
         float yawRad = GeomMath.toRadians(rotY);
-        // [FIXED] Left-Handed Vector Math (+Z Forward, +X Right)
         float forwardX = lang.FastMath.sin32(yawRad);
         float forwardZ = lang.FastMath.cos32(yawRad);
-
         float rightX = lang.FastMath.cos32(yawRad);
         float rightZ = -lang.FastMath.sin32(yawRad);
 
-        if (Keyboard.isKeyDown(Keyboard.W)) {
-            posX += forwardX * distance;
-            posZ += forwardZ * distance;
-            moved = true;
-        }
-        if (Keyboard.isKeyDown(Keyboard.S)) {
-            posX -= forwardX * distance;
-            posZ -= forwardZ * distance;
-            moved = true;
-        }
-        if (Keyboard.isKeyDown(Keyboard.D)) {
-            posX += rightX * distance;
-            posZ += rightZ * distance;
-            moved = true;
-        }
-        if (Keyboard.isKeyDown(Keyboard.A)) {
-            posX -= rightX * distance;
-            posZ -= rightZ * distance;
-            moved = true;
-        }
-        if (Keyboard.isKeyDown(Keyboard.SPACE)) {
-            posY += distance; // Fly Up (+Y)
-            moved = true;
-        }
-        if (Keyboard.isKeyDown(Keyboard.LEFT_SHIFT)) {
-            posY -= distance; // Fly Down (-Y)
-            moved = true;
-        }
+        if (Keyboard.isKeyDown(Keyboard.W)) { posX += forwardX * distance; posZ += forwardZ * distance; moved = true; }
+        if (Keyboard.isKeyDown(Keyboard.S)) { posX -= forwardX * distance; posZ -= forwardZ * distance; moved = true; }
+        if (Keyboard.isKeyDown(Keyboard.D)) { posX += rightX * distance; posZ += rightZ * distance; moved = true; }
+        if (Keyboard.isKeyDown(Keyboard.A)) { posX -= rightX * distance; posZ -= rightZ * distance; moved = true; }
+        if (Keyboard.isKeyDown(Keyboard.SPACE)) { posY += distance; moved = true; }
+        if (Keyboard.isKeyDown(Keyboard.LEFT_SHIFT)) { posY -= distance; moved = true; }
 
-        if (moved) {
-            updateViewMatrix();
-        }
-
-        // debug when needed
-        // System.out.printf("Camera Position: %f, %f, %f", posX, posY, posZ);
+        return moved;
     }
 
     public void updateViewMatrix() {

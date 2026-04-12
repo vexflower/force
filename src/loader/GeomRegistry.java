@@ -1,27 +1,23 @@
 package loader;
 
 import hardware.VulkanContext;
-import model.Mesh;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.VkBufferCopy;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDevice;
-import util.FloatList;
-import util.IntList;
+import util.CFloatList;
+import util.CIntList;
 import util.VK;
-
-import java.nio.FloatBuffer;
-import java.nio.IntBuffer;
 
 import static org.lwjgl.vulkan.VK10.*;
 
 public class GeomRegistry {
 
-    // The raw CPU data pools
-    private static final FloatList megaVertexBuffer = new FloatList(1_000_000);
-    private static final IntList megaIndexBuffer = new IntList(1_000_000);
+        // The raw C-Memory data pools
+        private static final CFloatList megaVertexBuffer = new CFloatList(1_000_000);
+        private static final CIntList megaIndexBuffer = new CIntList(1_000_000);
 
     // Trackers for where the next mesh should be inserted
     private static int currentVertexOffset = 0;
@@ -37,37 +33,19 @@ public class GeomRegistry {
      * Appends a mesh into the mega-buffers and assigns its offsets.
      * Does NOT touch Vulkan. Strictly CPU-side packing.
      */
-    public static void appendMesh(Mesh mesh) {
-        int vertexCount = mesh.positions.length / 3;
-
-        // 1. Pack the Vertex Data strictly to 8 Floats (32 Bytes) to satisfy std430
-        for (int i = 0; i < vertexCount; i++) {
-            // Floats 0-3: Position X, Y, Z, and UV X
-            megaVertexBuffer.add(mesh.positions[i * 3]);
-            megaVertexBuffer.add(mesh.positions[i * 3 + 1]);
-            megaVertexBuffer.add(mesh.positions[i * 3 + 2]);
-            megaVertexBuffer.add(mesh.textures[i * 2]);
-
-            // Floats 4-7: UV Y, and Normal X, Y, Z
-            megaVertexBuffer.add(mesh.textures[i * 2 + 1]);
-            megaVertexBuffer.add(mesh.normals[i * 3]);
-            megaVertexBuffer.add(mesh.normals[i * 3 + 1]);
-            megaVertexBuffer.add(mesh.normals[i * 3 + 2]);
+    public static void appendMesh(mesh.Mesh mesh) {
+        for (int l = 0; l < mesh.lodCount; l++) {
+            for (int i = 0; i < mesh.lodVertexCounts[l] * 8; i++) {
+                megaVertexBuffer.add(MemoryUtil.memGetFloat(mesh.lodVertexPtrs[l] + (i * 4L)));
+            }
+            for (int i = 0; i < mesh.lodIndexCounts[l]; i++) {
+                megaIndexBuffer.add(MemoryUtil.memGetInt(mesh.lodIndexPtrs[l] + (i * 4L)));
+            }
+            mesh.lodVertexOffsets[l] = currentVertexOffset;
+            mesh.lodFirstIndices[l] = currentIndexOffset;
+            currentVertexOffset += mesh.lodVertexCounts[l];
+            currentIndexOffset += mesh.lodIndexCounts[l];
         }
-
-        // 2. Append Indices
-        for (int i = 0; i < mesh.indices.length; i++) {
-            megaIndexBuffer.add(mesh.indices[i]);
-        }
-
-        // 3. Record the offsets in the Mesh object so the Entity SSBO can find them!
-        mesh.vertexOffset = currentVertexOffset;
-        mesh.firstIndex = currentIndexOffset;
-        mesh.indexCount = mesh.indices.length;
-
-        // 4. Advance the global pointers
-        currentVertexOffset += vertexCount;
-        currentIndexOffset += mesh.indices.length;
     }
 
     /**
@@ -76,15 +54,8 @@ public class GeomRegistry {
      */
     public static void uploadToGPU() {
         System.out.println("Uploading Bindless Geometry: " + currentVertexOffset + " Vertices, " + currentIndexOffset + " Indices.");
-
-        // --- VULKAN SAFEGUARD ---
-        // Vulkan will violently crash if we try to allocate a 0-byte buffer.
-        // If the arrays are empty (e.g., loading failed), we inject a single invisible "dummy" vertex.
-        if (megaVertexBuffer.size() == 0 || megaIndexBuffer.size() == 0) {
-            System.err.println("CRITICAL WARNING: Geometry Mega-Buffers are empty! Injecting dummy vertex to prevent GPU crash.");
-            // Add 1 Dummy Vertex (8 floats = 32 bytes)
+        if (megaVertexBuffer.isEmpty() || megaIndexBuffer.isEmpty()) {
             for (int i = 0; i < 8; i++) megaVertexBuffer.add(0f);
-            // Add 1 Dummy Index
             megaIndexBuffer.add(0);
         }
 
@@ -101,8 +72,8 @@ public class GeomRegistry {
         megaIndexBuffer.clear();
     }
 
-    private static long[] createBufferFromFloatList(FloatList list, int usageFlag) {
-        long bufferSize = (long) list.size() * 4;
+    private static long[] createBufferFromFloatList(CFloatList list, int usageFlag) {
+        long bufferSize = (long) list.size() * 4L;
         VkDevice device = VulkanContext.getDevice();
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -112,11 +83,8 @@ public class GeomRegistry {
             PointerBuffer pData = stack.mallocPointer(1);
             vkMapMemory(device, stagingMemory, 0, bufferSize, 0, pData);
 
-            // Fast zero-allocation bulk copy
-            FloatBuffer floatBuffer = MemoryUtil.memFloatBuffer(pData.get(0), list.size());
-            floatBuffer.put(list.toArray());
-
-            vkUnmapMemory(device, stagingMemory);
+            // ---> THE ULTIMATE ZERO-GC MEMORY TRANSFER <---
+            MemoryUtil.memCopy(list.address(), pData.get(0), bufferSize);
 
             long gpuBuffer = VK.createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usageFlag);
             long gpuMemory = VK.allocateBufferMemory(gpuBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -130,8 +98,8 @@ public class GeomRegistry {
         }
     }
 
-    private static long[] createBufferFromIntList(IntList list, int usageFlag) {
-        long bufferSize = (long) list.size() * 4;
+    private static long[] createBufferFromIntList(CIntList list, int usageFlag) {
+        long bufferSize = (long) list.size() * 4L;
         VkDevice device = VulkanContext.getDevice();
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -141,8 +109,8 @@ public class GeomRegistry {
             PointerBuffer pData = stack.mallocPointer(1);
             vkMapMemory(device, stagingMemory, 0, bufferSize, 0, pData);
 
-            IntBuffer intBuffer = MemoryUtil.memIntBuffer(pData.get(0), list.size());
-            intBuffer.put(list.toArray());
+            // ---> THE ULTIMATE ZERO-GC MEMORY TRANSFER <---
+            MemoryUtil.memCopy(list.address(), pData.get(0), bufferSize);
 
             vkUnmapMemory(device, stagingMemory);
 
