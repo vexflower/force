@@ -1,0 +1,40 @@
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Read from your existing Bindless Textures array
+layout(set = 0, binding = 0) uniform sampler2D textures[];
+
+// ---> NEW: A Bindless Array for writing to individual Mip Levels! <---
+layout(set = 0, binding = 11, r32f) uniform writeonly image2D mipImages[];
+
+layout(push_constant) uniform PushConstants {
+    int inputTextureId;
+    int outputImageId;
+    vec2 invInputResolution;
+} push;
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 imgSize = imageSize(mipImages[nonuniformEXT(push.outputImageId)]);
+
+    // Safety check: Don't write outside the mipmap bounds
+    if(pos.x >= imgSize.x || pos.y >= imgSize.y) return;
+
+    // Calculate the UV coordinate for the center of the 2x2 block
+    vec2 uv = (vec2(pos) + 0.5) * push.invInputResolution * 2.0;
+
+    // Sample the 4 pixels from the higher-resolution Mip Level
+    float d1 = textureOffset(textures[nonuniformEXT(push.inputTextureId)], uv, ivec2(0, 0)).r;
+    float d2 = textureOffset(textures[nonuniformEXT(push.inputTextureId)], uv, ivec2(1, 0)).r;
+    float d3 = textureOffset(textures[nonuniformEXT(push.inputTextureId)], uv, ivec2(0, 1)).r;
+    float d4 = textureOffset(textures[nonuniformEXT(push.inputTextureId)], uv, ivec2(1, 1)).r;
+
+    // Vulkan Depth: 1.0 is Far, 0.0 is Near.
+    // We want the FURTHEST distance in this 2x2 block, so we take the max!
+    float maxDepth = max(max(d1, d2), max(d3, d4));
+
+    // Write the result to the lower-resolution Mip Level
+    imageStore(mipImages[nonuniformEXT(push.outputImageId)], pos, vec4(maxDepth, 0.0, 0.0, 0.0));
+}

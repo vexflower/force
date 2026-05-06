@@ -172,13 +172,15 @@ public class VulkanContext {
 
             VkPhysicalDeviceFeatures deviceFeatures = VkPhysicalDeviceFeatures.calloc(stack).multiDrawIndirect(true);
 
-            // Bindless Features required by the Ubershader
+            // Bindless Features required by the Uber shader
             VkPhysicalDeviceVulkan12Features bindlessFeatures = VkPhysicalDeviceVulkan12Features.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES)
                     .descriptorBindingPartiallyBound(true)
                     .runtimeDescriptorArray(true)
                     .shaderSampledImageArrayNonUniformIndexing(true)
-                    .descriptorBindingSampledImageUpdateAfterBind(true);
+                    .descriptorBindingSampledImageUpdateAfterBind(true)
+                    .descriptorBindingStorageImageUpdateAfterBind(true)
+                    .shaderStorageImageArrayNonUniformIndexing(true);
 
             VkPhysicalDeviceFeatures2 features2 = VkPhysicalDeviceFeatures2.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2)

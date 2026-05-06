@@ -6,6 +6,7 @@ import lang.Mat4;
 import entity.Camera;
 import move.Move;
 import move.MoveType;
+import renderer.SceneSnapshot;
 
 public class Scene3D extends Scene {
 
@@ -38,21 +39,31 @@ public class Scene3D extends Scene {
     public void update(float delta) {
         if (currentCamera != null) {
             if (this.updatesCamera) currentCamera.move(delta);
-            // In Scene3D.java update()
+
+
             projectionMatrix.mul(currentCamera.viewMatrix, vpMatrix);
+
             for (int i = 0; i < activeEntities.size(); i++) {
                 activeEntities.get(i).update(delta);
             }
         }
         super.update(delta);
     }
-
     // ---> THE FIX: Inject the Camera Matrix into the Snapshot! <---
     @Override
     public void extract3DEntities(renderer.RenderState state) {
         if (state.snapshotCount < state.snapshots.length) {
             // Push Matrix natively to C-Memory!
+            SceneSnapshot snap = state.snapshots[state.snapshotCount];
             vpMatrix.store(state.snapshots[state.snapshotCount].vpMatrix);
+
+            // NEW: Inject real camera coordinates
+            if (currentCamera != null) {
+                snap.camX = currentCamera.posX;
+                snap.camY = currentCamera.posY;
+                snap.camZ = currentCamera.posZ;
+                snap.p11 = projectionMatrix.m11; // The Vertical FOV Scale
+            }
         }
         super.extract3DEntities(state);
     }

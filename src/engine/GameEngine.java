@@ -2,15 +2,13 @@ package engine;
 
 import hardware.VulkanContext;
 import hardware.Window;
-import loader.MeshLoader;
+import mesh.MeshLoader;
 import loader.TextureRegistry;
 import renderer.RenderState;
 import renderer.SharedState;
-import ui.scene.Scene;
 import renderer.MasterRenderer;
 
 public class GameEngine {
-
     private static volatile boolean running = true;
     private static final SharedState sharedState = new SharedState();
 
@@ -35,7 +33,6 @@ public class GameEngine {
         }
 
         MasterRenderer.destroy();
-        MeshLoader.destroy();
         loader.GeomRegistry.destroy();
         TextureRegistry.destroy();
 
@@ -70,7 +67,7 @@ public class GameEngine {
             }
 
             if (ticked) {
-                ui.Container root = Window.getContentPane(); // <--- Now uses Window
+                ui.Container root = Window.getContentPane();
                 if (root != null) {
                     RenderState backBuffer = sharedState.getBackBuffer();
                     backBuffer.clear();
@@ -81,7 +78,9 @@ public class GameEngine {
                     sharedState.swap();
                 }
             }
-            Thread.yield();
+
+            // Suspend the thread for 1 millisecond to prevent CPU thrashing
+            java.util.concurrent.locks.LockSupport.parkNanos(1_000_000);
         }
     }
 }

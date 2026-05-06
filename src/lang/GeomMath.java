@@ -52,6 +52,17 @@ public final class GeomMath {
      * we algebraically calculate the final 16 floats and write them directly.
      * Reduces ~150 multiplications down to 21.
      */
+    /**
+     * Corrected for RAW bits to avoid NaN-check branching.
+     */
+    public static float abs(float value) {
+        return Float.intBitsToFloat(Float.floatToRawIntBits(value) & 0x7fffffff);
+    }
+
+    /**
+     * Refactored Transformation Matrix
+     * Removed double conversion and used Raw bits.
+     */
     public static Mat4 createTransformationMatrix(
             float posX, float posY, float posZ,
             float rotX, float rotY, float rotZ,
@@ -60,42 +71,35 @@ public final class GeomMath {
 
         if (dest == null) dest = new Mat4();
 
-        float rx = rotX * DEG_TO_RAD;
-        float ry = rotY * DEG_TO_RAD;
-        float rz = rotZ * DEG_TO_RAD;
+        // Use the pre-multiplied constants directly
+        final float rx = rotX * DEG_TO_RAD;
+        final float ry = rotY * DEG_TO_RAD;
+        final float rz = rotZ * DEG_TO_RAD;
 
-        float cx = FastMath.cos32(rx);
-        float sx = FastMath.sin32(rx);
-        float cy = FastMath.cos32(ry);
-        float sy = FastMath.sin32(ry);
-        float cz = FastMath.cos32(rz);
-        float sz = FastMath.sin32(rz);
+        final float cx = FastMath.cos32(rx);
+        final float sx = FastMath.sin32(rx);
+        final float cy = FastMath.cos32(ry);
+        final float sy = FastMath.sin32(ry);
+        final float cz = FastMath.cos32(rz);
+        final float sz = FastMath.sin32(rz);
 
-        float r00 = cy * cz;
-        float r01 = cy * sz;
-        float r02 = -sy;
+        // Pre-calculate rotation components to avoid re-calculating during scaling
+        final float cycz = cy * cz;
+        final float cysz = cy * sz;
 
-        float r10 = sx * sy * cz - cx * sz;
-        float r11 = sx * sy * sz + cx * cz;
-        float r12 = sx * cy;
-
-        float r20 = cx * sy * cz + sx * sz;
-        float r21 = cx * sy * sz - sx * cz;
-        float r22 = cx * cy;
-
-        dest.m00 = r00 * scaleX;
-        dest.m01 = r01 * scaleX;
-        dest.m02 = r02 * scaleX;
+        dest.m00 = cycz * scaleX;
+        dest.m01 = cysz * scaleX;
+        dest.m02 = -sy * scaleX;
         dest.m03 = 0.0f;
 
-        dest.m10 = r10 * scaleY;
-        dest.m11 = r11 * scaleY;
-        dest.m12 = r12 * scaleY;
+        dest.m10 = (sx * sy * cz - cx * sz) * scaleY;
+        dest.m11 = (sx * sy * sz + cx * cz) * scaleY;
+        dest.m12 = (sx * cy) * scaleY;
         dest.m13 = 0.0f;
 
-        dest.m20 = r20 * scaleZ;
-        dest.m21 = r21 * scaleZ;
-        dest.m22 = r22 * scaleZ;
+        dest.m20 = (cx * sy * cz + sx * sz) * scaleZ;
+        dest.m21 = (cx * sy * sz - sx * cz) * scaleZ;
+        dest.m22 = (cx * cy) * scaleZ;
         dest.m23 = 0.0f;
 
         dest.m30 = posX;
@@ -158,52 +162,6 @@ public final class GeomMath {
         dest.m33 = 1.0f;
 
         return dest;
-    }
-
-    // =========================================================================================
-    // BASIC ARITHMETIC & TRIGONOMETRY WRAPPERS
-    // =========================================================================================
-
-    public static float toRadians(float degrees) {
-        return degrees * DEG_TO_RAD;
-    }
-
-    public static float toDegrees(float radians) {
-        return radians * RAD_TO_DEG;
-    }
-
-    public static int abs(int n) {
-        return (n ^ (n >> 31)) - (n >> 31);
-    }
-
-    public static float abs(float value) {
-        return Float.intBitsToFloat(Float.floatToIntBits(value) & 0x7fffffff);
-    }
-
-    public static float pow(float base, float exponent) {
-        return (float) Math.pow(base, exponent);
-    }
-
-    public static float clamp(float val, float min, float max) {
-        return Math.max(min, Math.min(max, val));
-    }
-
-    public static float cosFromSin(float sin, float angle) {
-        int quadrant = sin >= 0 ? (angle >= 0 ? 1 : 4) : (angle >= 0 ? 2 : 3);
-        float cosSquared = 1 - sin * sin;
-        return (float) (Math.sqrt(cosSquared) * (quadrant == 1 || quadrant == 4 ? 1 : -1));
-    }
-
-    public static double sin(double angle) {
-        return FastMath.sin32((float) angle);
-    }
-
-    public static float sin(float angle) {
-        return FastMath.sin32(angle);
-    }
-
-    public static float cos(float angle) {
-        return FastMath.cos32(angle);
     }
 
     // =========================================================================================

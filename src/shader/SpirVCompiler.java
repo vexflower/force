@@ -9,15 +9,11 @@ import java.nio.file.Files;
 import static org.lwjgl.system.MemoryUtil.NULL;
 import static org.lwjgl.util.shaderc.Shaderc.*;
 
-/**
- * Standalone Asset Pipeline Tool.
- * Run this class's main() method to compile all .vert and .frag files into .spv binaries.
- */
 public class SpirVCompiler {
 
-    // Define where your human-readable shaders live, and where the binaries should go
-    private static final String SOURCE_DIR = "src/shader/";
-    private static final String OUTPUT_DIR = "src/shader/"; // Could also be a separate 'bin' folder
+    // ---> UPDATED TO MATCH YOUR SCREENSHOT <---
+    private static final String SOURCE_DIR = "src/shader/code/";
+    private static final String OUTPUT_DIR = "src/shader/spv/";
 
     public static void main(String[] args) {
         System.out.println("--- Starting SPIR-V Asset Compilation ---");
@@ -28,11 +24,13 @@ public class SpirVCompiler {
         long options = shaderc_compile_options_initialize();
         shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_performance);
 
-        // Compile Vertex Shaders (glsl -> vertex)
-        compileShader(compiler, options, "glsl/vertex.vert", "vertex/vertex.spv", shaderc_glsl_vertex_shader);
+        // 1. Compile Graphics Shaders
+        compileShader(compiler, options, "vertex.vert", "vertex.spv", shaderc_glsl_vertex_shader);
+        compileShader(compiler, options, "fragment.frag", "fragment.spv", shaderc_glsl_fragment_shader);
 
-        // Compile Fragment Shaders (glsl -> fragment)
-        compileShader(compiler, options, "glsl/fragment.frag", "fragment/fragment.spv", shaderc_glsl_fragment_shader);
+        // 2. Compile the new Compute Shader Brain!
+        compileShader(compiler, options, "culling.comp", "culling.spv", shaderc_glsl_compute_shader);
+        compileShader(compiler, options, "hiz.comp", "hiz.spv", shaderc_glsl_compute_shader);
 
         shaderc_compile_options_release(options);
         shaderc_compiler_release(compiler);
@@ -48,22 +46,17 @@ public class SpirVCompiler {
         }
 
         try {
-            // 1. Read the raw GLSL text
             String source = Files.readString(sourceFile.toPath());
-
-            // 2. Compile to SPIR-V
             long result = shaderc_compile_into_spv(compiler, source, shaderKind, sourceFile.getName(), "main", options);
 
             if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success) {
                 throw new RuntimeException("Failed to compile " + sourceFile.getName() + ":\n" + shaderc_result_get_error_message(result));
             }
 
-            // 3. Extract the bytecode
             ByteBuffer spv = shaderc_result_get_bytes(result);
 
-            // 4. Save to a .spv file
             File outputFile = new File(OUTPUT_DIR + outputPath);
-            outputFile.getParentFile().mkdirs(); // Ensure directories exist
+            outputFile.getParentFile().mkdirs();
 
             try (FileOutputStream fos = new FileOutputStream(outputFile);
                  FileChannel channel = fos.getChannel()) {
@@ -71,8 +64,6 @@ public class SpirVCompiler {
             }
 
             System.out.println("Successfully compiled: " + outputFile.getName());
-
-            // 5. Clean up C++ memory
             shaderc_result_release(result);
 
         } catch (Exception e) {

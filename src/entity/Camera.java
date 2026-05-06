@@ -2,6 +2,7 @@ package entity;
 
 import hardware.Keyboard;
 import hardware.Mouse;
+import lang.FastMath;
 import lang.Mat4;
 import lang.GeomMath;
 import move.Move;
@@ -11,7 +12,7 @@ public class Camera {
     public float rotX, rotY, rotZ; // x = pitch, y = yaw, z = roll
 
     public final Mat4 viewMatrix = new Mat4();
-    private static final float WALK_SPEED = 50f;
+    private static final float WALK_SPEED = 100f;
     private static final float MOUSE_SENSITIVITY = 0.15f;
 
     // Mouse tracking state
@@ -110,11 +111,11 @@ public class Camera {
         }
         lastMouseX = mouseX; lastMouseY = mouseY;
 
-        float yawRad = GeomMath.toRadians(rotY);
-        float forwardX = lang.FastMath.sin32(yawRad);
-        float forwardZ = lang.FastMath.cos32(yawRad);
-        float rightX = lang.FastMath.cos32(yawRad);
-        float rightZ = -lang.FastMath.sin32(yawRad);
+        float yawRad = FastMath.toRadians(rotY);
+        float forwardX = FastMath.sin32(yawRad);
+        float forwardZ = FastMath.cos32(yawRad);
+        float rightX = FastMath.cos32(yawRad);
+        float rightZ = -FastMath.sin32(yawRad);
 
         if (Keyboard.isKeyDown(Keyboard.W)) { posX += forwardX * distance; posZ += forwardZ * distance; moved = true; }
         if (Keyboard.isKeyDown(Keyboard.S)) { posX -= forwardX * distance; posZ -= forwardZ * distance; moved = true; }

@@ -52,14 +52,18 @@ public class Mat4 {
     // Creates a 3D Camera Lens
     // Creates a Left-Handed, Y-Up 3D Camera Lens mapped to Vulkan NDC
     public Mat4 perspective(float fov, float aspect, float zNear, float zFar) {
-        float tanHalfFov = (float) Math.tan(Math.toRadians(fov) / 2.0);
+        float halfFovRad = (fov * GeomMath.DEG_TO_RAD) * 0.5f;
+
+        float s = FastMath.sin32(halfFovRad);
+        float c = FastMath.cos32(halfFovRad);
+        float tanHalfFov = s / c;
+
         setZero();
 
         m00 = 1.0f / (aspect * tanHalfFov);
-        m11 = -(1.0f / tanHalfFov);             // [FLIP Y]: Vulkan is native Y-Down. This flips it to Y-Up!
-
-        m22 = zFar / (zFar - zNear);            // [LEFT-HANDED]: Map Z from Near-Far to Vulkan's 0-1 range
-        m23 = 1.0f;                             // [LEFT-HANDED]: +Z goes FORWARD! W = Z
+        m11 = -(1.0f / tanHalfFov);
+        m22 = zFar / (zFar - zNear);
+        m23 = 1.0f;
         m32 = -(zFar * zNear) / (zFar - zNear);
 
         return this;
@@ -80,73 +84,190 @@ public class Mat4 {
 
 
     public static void mul(Mat4 left, Mat4 right, Mat4 dest) {
-        float l00 = left.m00, l01 = left.m01, l02 = left.m02, l03 = left.m03;
-        float l10 = left.m10, l11 = left.m11, l12 = left.m12, l13 = left.m13;
-        float l20 = left.m20, l21 = left.m21, l22 = left.m22, l23 = left.m23;
-        float l30 = left.m30, l31 = left.m31, l32 = left.m32, l33 = left.m33;
 
-        float r00 = right.m00, r01 = right.m01, r02 = right.m02, r03 = right.m03;
-        float r10 = right.m10, r11 = right.m11, r12 = right.m12, r13 = right.m13;
-        float r20 = right.m20, r21 = right.m21, r22 = right.m22, r23 = right.m23;
-        float r30 = right.m30, r31 = right.m31, r32 = right.m32, r33 = right.m33;
+        final float l00 = left.m00, l01 = left.m01, l02 = left.m02, l03 = left.m03;
+        final float l10 = left.m10, l11 = left.m11, l12 = left.m12, l13 = left.m13;
+        final float l20 = left.m20, l21 = left.m21, l22 = left.m22, l23 = left.m23;
+        final float l30 = left.m30, l31 = left.m31, l32 = left.m32, l33 = left.m33;
 
-        dest.m00 = l00 * r00 + l10 * r01 + l20 * r02 + l30 * r03;
-        dest.m01 = l01 * r00 + l11 * r01 + l21 * r02 + l31 * r03;
-        dest.m02 = l02 * r00 + l12 * r01 + l22 * r02 + l32 * r03;
-        dest.m03 = l03 * r00 + l13 * r01 + l23 * r02 + l33 * r03;
+        final float r00 = right.m00, r01 = right.m01, r02 = right.m02, r03 = right.m03;
+        final float r10 = right.m10, r11 = right.m11, r12 = right.m12, r13 = right.m13;
+        final float r20 = right.m20, r21 = right.m21, r22 = right.m22, r23 = right.m23;
+        final float r30 = right.m30, r31 = right.m31, r32 = right.m32, r33 = right.m33;
 
-        dest.m10 = l00 * r10 + l10 * r11 + l20 * r12 + l30 * r13;
-        dest.m11 = l01 * r10 + l11 * r11 + l21 * r12 + l31 * r13;
-        dest.m12 = l02 * r10 + l12 * r11 + l22 * r12 + l32 * r13;
-        dest.m13 = l03 * r10 + l13 * r11 + l23 * r12 + l33 * r13;
+        float m00_1 = l00 * r00;
+        float m00_2 = l10 * r01;
+        float m00_3 = l20 * r02;
+        float m00_4 = l30 * r03;
+        dest.m00 = (m00_1 + m00_2) + (m00_3 + m00_4);
 
-        dest.m20 = l00 * r20 + l10 * r21 + l20 * r22 + l30 * r23;
-        dest.m21 = l01 * r20 + l11 * r21 + l21 * r22 + l31 * r23;
-        dest.m22 = l02 * r20 + l12 * r21 + l22 * r22 + l32 * r23;
-        dest.m23 = l03 * r20 + l13 * r21 + l23 * r22 + l33 * r23;
+        float m01_1 = l01 * r00;
+        float m01_2 = l11 * r01;
+        float m01_3 = l21 * r02;
+        float m01_4 = l31 * r03;
+        dest.m01 = (m01_1 + m01_2) + (m01_3 + m01_4);
 
-        dest.m30 = l00 * r30 + l10 * r31 + l20 * r32 + l30 * r33;
-        dest.m31 = l01 * r30 + l11 * r31 + l21 * r32 + l31 * r33;
-        dest.m32 = l02 * r30 + l12 * r31 + l22 * r32 + l32 * r33;
-        dest.m33 = l03 * r30 + l13 * r31 + l23 * r32 + l33 * r33;
+        float m02_1 = l02 * r00;
+        float m02_2 = l12 * r01;
+        float m02_3 = l22 * r02;
+        float m02_4 = l32 * r03;
+        dest.m02 = (m02_1 + m02_2) + (m02_3 + m02_4);
+
+        float m03_1 = l03 * r00;
+        float m03_2 = l13 * r01;
+        float m03_3 = l23 * r02;
+        float m03_4 = l33 * r03;
+        dest.m03 = (m03_1 + m03_2) + (m03_3 + m03_4);
+
+        float m10_1 = l00 * r10;
+        float m10_2 = l10 * r11;
+        float m10_3 = l20 * r12;
+        float m10_4 = l30 * r13;
+        dest.m10 = (m10_1 + m10_2) + (m10_3 + m10_4);
+
+        float m11_1 = l01 * r10;
+        float m11_2 = l11 * r11;
+        float m11_3 = l21 * r12;
+        float m11_4 = l31 * r13;
+        dest.m11 = (m11_1 + m11_2) + (m11_3 + m11_4);
+
+        float m12_1 = l02 * r10;
+        float m12_2 = l12 * r11;
+        float m12_3 = l22 * r12;
+        float m12_4 = l32 * r13;
+        dest.m12 = (m12_1 + m12_2) + (m12_3 + m12_4);
+
+        float m13_1 = l03 * r10;
+        float m13_2 = l13 * r11;
+        float m13_3 = l23 * r12;
+        float m13_4 = l33 * r13;
+        dest.m13 = (m13_1 + m13_2) + (m13_3 + m13_4);
+
+        float m20_1 = l00 * r20;
+        float m20_2 = l10 * r21;
+        float m20_3 = l20 * r22;
+        float m20_4 = l30 * r23;
+        dest.m20 = (m20_1 + m20_2) + (m20_3 + m20_4);
+
+        float m21_1 = l01 * r20;
+        float m21_2 = l11 * r21;
+        float m21_3 = l21 * r22;
+        float m21_4 = l31 * r23;
+        dest.m21 = (m21_1 + m21_2) + (m21_3 + m21_4);
+
+        float m22_1 = l02 * r20;
+        float m22_2 = l12 * r21;
+        float m22_3 = l22 * r22;
+        float m22_4 = l32 * r23;
+        dest.m22 = (m22_1 + m22_2) + (m22_3 + m22_4);
+
+        float m23_1 = l03 * r20;
+        float m23_2 = l13 * r21;
+        float m23_3 = l23 * r22;
+        float m23_4 = l33 * r23;
+        dest.m23 = (m23_1 + m23_2) + (m23_3 + m23_4);
+
+        float m30_1 = l00 * r30;
+        float m30_2 = l10 * r31;
+        float m30_3 = l20 * r32;
+        float m30_4 = l30 * r33;
+        dest.m30 = (m30_1 + m30_2) + (m30_3 + m30_4);
+
+        float m31_1 = l01 * r30;
+        float m31_2 = l11 * r31;
+        float m31_3 = l21 * r32;
+        float m31_4 = l31 * r33;
+        dest.m31 = (m31_1 + m31_2) + (m31_3 + m31_4);
+
+        float m32_1 = l02 * r30;
+        float m32_2 = l12 * r31;
+        float m32_3 = l22 * r32;
+        float m32_4 = l32 * r33;
+        dest.m32 = (m32_1 + m32_2) + (m32_3 + m32_4);
+
+        float m33_1 = l03 * r30;
+        float m33_2 = l13 * r31;
+        float m33_3 = l23 * r32;
+        float m33_4 = l33 * r33;
+        dest.m33 = (m33_1 + m33_2) + (m33_3 + m33_4);
     }
-
-    // ========================================================================
-    // INSTANCE WRAPPERS
-    // ========================================================================
-
 
     public Mat4 mul(Mat4 right, Mat4 dest) {
         mul(this, right, dest);
         return dest;
     }
 
-    // Zero-Allocation Matrix Multiplication
-    public Mat4 mul(Mat4 r) {
-        float nm00 = this.m00 * r.m00 + this.m01 * r.m10 + this.m02 * r.m20 + this.m03 * r.m30;
-        float nm01 = this.m00 * r.m01 + this.m01 * r.m11 + this.m02 * r.m21 + this.m03 * r.m31;
-        float nm02 = this.m00 * r.m02 + this.m01 * r.m12 + this.m02 * r.m22 + this.m03 * r.m32;
-        float nm03 = this.m00 * r.m03 + this.m01 * r.m13 + this.m02 * r.m23 + this.m03 * r.m33;
+    public Mat4 mul(Mat4 right) {
 
-        float nm10 = this.m10 * r.m00 + this.m11 * r.m10 + this.m12 * r.m20 + this.m13 * r.m30;
-        float nm11 = this.m10 * r.m01 + this.m11 * r.m11 + this.m12 * r.m21 + this.m13 * r.m31;
-        float nm12 = this.m10 * r.m02 + this.m11 * r.m12 + this.m12 * r.m22 + this.m13 * r.m32;
-        float nm13 = this.m10 * r.m03 + this.m11 * r.m13 + this.m12 * r.m23 + this.m13 * r.m33;
+        float m00_p1 = this.m00 * right.m00 + this.m01 * right.m10;
+        float m00_p2 = this.m02 * right.m20 + this.m03 * right.m30;
+        float nm00 = m00_p1 + m00_p2;
 
-        float nm20 = this.m20 * r.m00 + this.m21 * r.m10 + this.m22 * r.m20 + this.m23 * r.m30;
-        float nm21 = this.m20 * r.m01 + this.m21 * r.m11 + this.m22 * r.m21 + this.m23 * r.m31;
-        float nm22 = this.m20 * r.m02 + this.m21 * r.m12 + this.m22 * r.m22 + this.m23 * r.m32;
-        float nm23 = this.m20 * r.m03 + this.m21 * r.m13 + this.m22 * r.m23 + this.m23 * r.m33;
+        float m01_p1 = this.m00 * right.m01 + this.m01 * right.m11;
+        float m01_p2 = this.m02 * right.m21 + this.m03 * right.m31;
+        float nm01 = m01_p1 + m01_p2;
 
-        float nm30 = this.m30 * r.m00 + this.m31 * r.m10 + this.m32 * r.m20 + this.m33 * r.m30;
-        float nm31 = this.m30 * r.m01 + this.m31 * r.m11 + this.m32 * r.m21 + this.m33 * r.m31;
-        float nm32 = this.m30 * r.m02 + this.m31 * r.m12 + this.m32 * r.m22 + this.m33 * r.m32;
-        float nm33 = this.m30 * r.m03 + this.m31 * r.m13 + this.m32 * r.m23 + this.m33 * r.m33;
+        float m02_p1 = this.m00 * right.m02 + this.m01 * right.m12;
+        float m02_p2 = this.m02 * right.m22 + this.m03 * right.m32;
+        float nm02 = m02_p1 + m02_p2;
+
+        float m03_p1 = this.m00 * right.m03 + this.m01 * right.m13;
+        float m03_p2 = this.m02 * right.m23 + this.m03 * right.m33;
+        float nm03 = m03_p1 + m03_p2;
+
+        float m10_p1 = this.m10 * right.m00 + this.m11 * right.m10;
+        float m10_p2 = this.m12 * right.m20 + this.m13 * right.m30;
+        float nm10 = m10_p1 + m10_p2;
+
+        float m11_p1 = this.m10 * right.m01 + this.m11 * right.m11;
+        float m11_p2 = this.m12 * right.m21 + this.m13 * right.m31;
+        float nm11 = m11_p1 + m11_p2;
+
+        float m12_p1 = this.m10 * right.m02 + this.m11 * right.m12;
+        float m12_p2 = this.m12 * right.m22 + this.m13 * right.m32;
+        float nm12 = m12_p1 + m12_p2;
+
+        float m13_p1 = this.m10 * right.m03 + this.m11 * right.m13;
+        float m13_p2 = this.m12 * right.m23 + this.m13 * right.m33;
+        float nm13 = m13_p1 + m13_p2;
+
+        float m20_p1 = this.m20 * right.m00 + this.m21 * right.m10;
+        float m20_p2 = this.m22 * right.m20 + this.m23 * right.m30;
+        float nm20 = m20_p1 + m20_p2;
+
+        float m21_p1 = this.m20 * right.m01 + this.m21 * right.m11;
+        float m21_p2 = this.m22 * right.m21 + this.m23 * right.m31;
+        float nm21 = m21_p1 + m21_p2;
+
+        float m22_p1 = this.m20 * right.m02 + this.m21 * right.m12;
+        float m22_p2 = this.m22 * right.m22 + this.m23 * right.m32;
+        float nm22 = m22_p1 + m22_p2;
+
+        float m23_p1 = this.m20 * right.m03 + this.m21 * right.m13;
+        float m23_p2 = this.m22 * right.m23 + this.m23 * right.m33;
+        float nm23 = m23_p1 + m23_p2;
+
+        float m30_p1 = this.m30 * right.m00 + this.m31 * right.m10;
+        float m30_p2 = this.m32 * right.m20 + this.m33 * right.m30;
+        float nm30 = m30_p1 + m30_p2;
+
+        float m31_p1 = this.m30 * right.m01 + this.m31 * right.m11;
+        float m31_p2 = this.m32 * right.m21 + this.m33 * right.m31;
+        float nm31 = m31_p1 + m31_p2;
+
+        float m32_p1 = this.m30 * right.m02 + this.m31 * right.m12;
+        float m32_p2 = this.m32 * right.m22 + this.m33 * right.m32;
+        float nm32 = m32_p1 + m32_p2;
+
+        float m33_p1 = this.m30 * right.m03 + this.m31 * right.m13;
+        float m33_p2 = this.m32 * right.m23 + this.m33 * right.m33;
+        float nm33 = m33_p1 + m33_p2;
 
         this.m00 = nm00; this.m01 = nm01; this.m02 = nm02; this.m03 = nm03;
         this.m10 = nm10; this.m11 = nm11; this.m12 = nm12; this.m13 = nm13;
         this.m20 = nm20; this.m21 = nm21; this.m22 = nm22; this.m23 = nm23;
         this.m30 = nm30; this.m31 = nm31; this.m32 = nm32; this.m33 = nm33;
+
         return this;
     }
 

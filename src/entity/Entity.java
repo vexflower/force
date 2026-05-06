@@ -13,7 +13,8 @@ public class Entity {
 
     public float x, y, z;
     public float rotX, rotY, rotZ;
-    public float scale = 1.0f;
+    public float scaleX = 1.0f, scaleY = 1.0f, scaleZ = 1.0f;
+    public float isOccluder = 0.0f; // 1.0f for Walls, 0.0f for everything else
 
     public Material material = new Material();
     public final Mat4 modelMatrix = new Mat4();
@@ -36,10 +37,20 @@ public class Entity {
         this.x = x; this.y = y; this.z = z;
         isDirty = true;
     }
-    public void setRotation(float rx, float ry, float rz) { this.rotX = rx; this.rotY = ry; this.rotZ = rz;
-        isDirty = true; }
-    public void setScale(float s) { this.scale = s;
-        isDirty = true; }
+    public void setRotation(float rx, float ry, float rz) {
+        this.rotX = rx; this.rotY = ry; this.rotZ = rz;
+        isDirty = true;
+    }
+
+    // ---> NEW: 3D Scale Setters <---
+    public void setScale(float s) {
+        this.scaleX = s; this.scaleY = s; this.scaleZ = s;
+        isDirty = true;
+    }
+    public void setScale(float x, float y, float z) {
+        this.scaleX = x; this.scaleY = y; this.scaleZ = z;
+        isDirty = true;
+    }
 
     // --- ANIMATION API ---
 
@@ -58,8 +69,8 @@ public class Entity {
     }
 
     public void moveScale(int moveTypeCurve, int moveType, float destScale, float duration) {
-        float ex = moveType == MoveType.STUDS ? scale + destScale : destScale;
-        scaleMove.start(moveTypeCurve, scale, 0, 0, ex, 0, 0, duration);
+        float ex = moveType == MoveType.STUDS ? scaleX + destScale : destScale;
+        scaleMove.start(moveTypeCurve, scaleX, 0, 0, ex, 0, 0, duration);
     }
 
     // Backwards compatibility for your current Main.java loop
@@ -68,28 +79,42 @@ public class Entity {
     }
 
     public void update(float delta) {
-        // Update Position
+        // Position
         if (posMove.active) {
-            posMove.time += delta;
-            float t = Math.min(posMove.time / posMove.duration, 1.0f);
-            float eased = posMove.getEased(t);
-            this.x = posMove.startX + (posMove.endX - posMove.startX) * eased;
-            this.y = posMove.startY + (posMove.endY - posMove.startY) * eased;
-            this.z = posMove.startZ + (posMove.endZ - posMove.startZ) * eased;
-            isDirty = true;
-            if (t >= 1.0f) posMove.active = false;
+            if (posMove.duration == -1f) {
+                this.x += posMove.endX * delta;
+                this.y += posMove.endY * delta;
+                this.z += posMove.endZ * delta;
+                isDirty = true;
+            } else {
+                posMove.time += delta;
+                float t = Math.min(posMove.time / posMove.duration, 1.0f);
+                float eased = posMove.getEased(t);
+                this.x = posMove.startX + (posMove.endX - posMove.startX) * eased;
+                this.y = posMove.startY + (posMove.endY - posMove.startY) * eased;
+                this.z = posMove.startZ + (posMove.endZ - posMove.startZ) * eased;
+                isDirty = true;
+                if (t >= 1.0f) posMove.active = false;
+            }
         }
 
-        // Update Rotation
+        // Rotation
         if (rotMove.active) {
-            rotMove.time += delta;
-            float t = Math.min(rotMove.time / rotMove.duration, 1.0f);
-            float eased = rotMove.getEased(t);
-            this.rotX = rotMove.startX + (rotMove.endX - rotMove.startX) * eased;
-            this.rotY = rotMove.startY + (rotMove.endY - rotMove.startY) * eased;
-            this.rotZ = rotMove.startZ + (rotMove.endZ - rotMove.startZ) * eased;
-            isDirty = true;
-            if (t >= 1.0f) rotMove.active = false;
+            if (rotMove.duration == -1f) {
+                this.rotX += rotMove.endX * delta;
+                this.rotY += rotMove.endY * delta;
+                this.rotZ += rotMove.endZ * delta;
+                isDirty = true;
+            } else {
+                rotMove.time += delta;
+                float t = Math.min(rotMove.time / rotMove.duration, 1.0f);
+                float eased = rotMove.getEased(t);
+                this.rotX = rotMove.startX + (rotMove.endX - rotMove.startX) * eased;
+                this.rotY = rotMove.startY + (rotMove.endY - rotMove.startY) * eased;
+                this.rotZ = rotMove.startZ + (rotMove.endZ - rotMove.startZ) * eased;
+                isDirty = true;
+                if (t >= 1.0f) rotMove.active = false;
+            }
         }
 
         // Update Scale
@@ -97,13 +122,14 @@ public class Entity {
             scaleMove.time += delta;
             float t = Math.min(scaleMove.time / scaleMove.duration, 1.0f);
             float eased = scaleMove.getEased(t);
-            this.scale = scaleMove.startX + (scaleMove.endX - scaleMove.startX) * eased;
+            float newScale = scaleMove.startX + (scaleMove.endX - scaleMove.startX) * eased;
+            this.scaleX = newScale; this.scaleY = newScale; this.scaleZ = newScale;
             isDirty = true;
             if (t >= 1.0f) scaleMove.active = false;
         }
 
         if (isDirty) {
-            GeomMath.createTransformationMatrix(x, y, z, rotX, rotY, rotZ, scale, scale, scale, modelMatrix);
+            GeomMath.createTransformationMatrix(x, y, z, rotX, rotY, rotZ, scaleX, scaleY, scaleZ, modelMatrix);
             isDirty = false;
         }
     }

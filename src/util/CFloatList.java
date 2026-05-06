@@ -17,13 +17,17 @@ public final class CFloatList extends CMemory {
     }
 
     public void add(float value) {
-        if (size >= capacity) expand(capacity * 2);
+        // If capacity is 0, bump it to a minimum size (e.g., 128) instead of 0 * 2
+        if (size >= capacity) expand(capacity == 0 ? 128 : capacity * 2);
         MemoryUtil.memPutFloat(ptr + (size * 4L), value);
         size++;
     }
 
     public void add(float x, float y, float z) {
-        if (size + 3 > capacity) expand(Math.max(capacity * 2, size + 3));
+        if (size + 3 > capacity) {
+            int newCap = capacity == 0 ? 128 : capacity * 2;
+            expand(Math.max(newCap, size + 3));
+        }
         MemoryUtil.memPutFloat(ptr + (size * 4L), x);
         MemoryUtil.memPutFloat(ptr + ((size + 1) * 4L), y);
         MemoryUtil.memPutFloat(ptr + ((size + 2) * 4L), z);
@@ -66,5 +70,18 @@ public final class CFloatList extends CMemory {
             size = 0;
             capacity = 0;
         }
+    }
+
+    public void add(float x, float y, float z, float w)
+    {
+        if (size + 4 > capacity) {
+            int newCap = capacity == 0 ? 128 : capacity * 2;
+            expand(Math.max(newCap, size + 4));
+        }
+        MemoryUtil.memPutFloat(ptr + (size * 4L), x);
+        MemoryUtil.memPutFloat(ptr + ((size + 1) * 4L), y);
+        MemoryUtil.memPutFloat(ptr + ((size + 2) * 4L), z);
+        MemoryUtil.memPutFloat(ptr + ((size + 3) * 4L), w);
+        size += 4;
     }
 }

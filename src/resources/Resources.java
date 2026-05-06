@@ -18,6 +18,9 @@ public class Resources {
     public static final long[] BINDLESS_TEXTURE_ARRAY = new long[4096];
     public static int textureCount = 0;
 
+    // Main.java (at the top of the file)
+    public static final String ENGINE_BASE_PATH = System.getProperty("user.home") + "\\Force";
+
     /**
      * Reads a file from the Fat-Jar directly into Off-Heap Memory.
      * @param path The path inside the resources folder (e.g., "textures/grass.png")

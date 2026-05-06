@@ -1,0 +1,124 @@
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct EntityData { mat4 modelMatrix; float diffuseId; float meshletOffset; float meshletCount; float isVisible; float trans; float cel; float refl; float shine; };
+struct DrawCommand { uint indexCount; uint instanceCount; uint firstIndex; int vertexOffset; uint firstInstance; };
+
+layout(set = 0, binding = 0) uniform sampler2D textures[];
+layout(std430, binding = 1) readonly buffer InstanceBuffer { EntityData instances[]; };
+layout(std430, binding = 6) readonly buffer MeshletBoundsBuffer { vec4 meshletBounds[]; };
+layout(std430, binding = 7) readonly buffer MeshletDataBuffer { uvec4 meshletData[]; };
+layout(std430, binding = 10) readonly buffer MeshletConeBuffer { vec4 meshletCones[]; };
+
+layout(std430, binding = 8) writeonly buffer IndirectDrawBuffer { DrawCommand drawCommands[]; };
+layout(std430, binding = 9) buffer AtomicCounter { uint drawCount[]; };
+
+layout(push_constant) uniform PushConstants {
+    mat4 viewProjection;
+    float camX; float camY; float camZ;
+    float p11;
+    float screenWidth; float screenHeight;
+    float hizMipLevels;
+    float instanceOffset; float commandOffset; float snapshotIndex;
+    float passType; // NEW: 0.0 = Occluders (Walls), 1.0 = Occludees (Foxes)
+} push;
+
+bool isFrustumCulled(vec4 worldCenter, float worldRadius) {
+    vec4 row0 = vec4(push.viewProjection[0][0], push.viewProjection[1][0], push.viewProjection[2][0], push.viewProjection[3][0]);
+    vec4 row1 = vec4(push.viewProjection[0][1], push.viewProjection[1][1], push.viewProjection[2][1], push.viewProjection[3][1]);
+    vec4 row2 = vec4(push.viewProjection[0][2], push.viewProjection[1][2], push.viewProjection[2][2], push.viewProjection[3][2]);
+    vec4 row3 = vec4(push.viewProjection[0][3], push.viewProjection[1][3], push.viewProjection[2][3], push.viewProjection[3][3]);
+
+    vec4 planes[6] = { row3 + row0, row3 - row0, row3 + row1, row3 - row1, row2, row3 - row2 };
+    for (int i = 0; i < 6; i++) planes[i] *= 1.0 / length(planes[i].xyz);
+    for (int i = 0; i < 6; i++) {
+        if (dot(planes[i].xyz, worldCenter.xyz) + planes[i].w < -worldRadius) return true;
+    }
+    return false;
+}
+
+bool isOcclusionCulled(vec4 worldCenter, float worldRadius, vec3 actualCameraPos) {
+    vec4 clip = push.viewProjection * worldCenter;
+    if (clip.w <= 0.0) return false;
+
+    vec3 ndc = clip.xyz / clip.w;
+    float p00 = push.viewProjection[0][0];
+    float nx = (worldRadius * abs(p00)) / clip.w;
+    float ny = (worldRadius * abs(push.p11)) / clip.w;
+
+    vec2 minUV = clamp((ndc.xy - vec2(nx, ny)) * 0.5 + 0.5, 0.0, 1.0);
+    vec2 maxUV = clamp((ndc.xy + vec2(nx, ny)) * 0.5 + 0.5, 0.0, 1.0);
+
+    vec2 size = (maxUV - minUV) * vec2(push.screenWidth, push.screenHeight);
+    float maxDim = max(size.x, size.y);
+    if (maxDim <= 1.0) return false;
+
+    float mip = clamp(ceil(log2(maxDim / 2.0)), 0.0, push.hizMipLevels - 1.0);
+    int mipId = 4000 + int(mip);
+
+    float d1 = texture(textures[nonuniformEXT(mipId)], vec2(minUV.x, minUV.y)).r;
+    float d2 = texture(textures[nonuniformEXT(mipId)], vec2(maxUV.x, minUV.y)).r;
+    float d3 = texture(textures[nonuniformEXT(mipId)], vec2(minUV.x, maxUV.y)).r;
+    float d4 = texture(textures[nonuniformEXT(mipId)], vec2(maxUV.x, maxUV.y)).r;
+
+    float maxDepth = max(max(d1, d2), max(d3, d4));
+
+    vec3 dirToCamera = normalize(actualCameraPos - worldCenter.xyz);
+    vec3 closestPoint = worldCenter.xyz + dirToCamera * worldRadius;
+    vec4 closestClip = push.viewProjection * vec4(closestPoint, 1.0);
+    float closestZ = closestClip.z / closestClip.w;
+
+    if (closestZ > maxDepth + 0.0001) return true;
+
+    return false;
+}
+
+void main() {
+    uint localInstanceID = gl_WorkGroupID.y;
+    uint globalInstanceID = floatBitsToUint(push.instanceOffset) + localInstanceID;
+    EntityData entity = instances[globalInstanceID];
+    uint localMeshletID = gl_GlobalInvocationID.x;
+
+    if (entity.isVisible < 0.5 || localMeshletID >= floatBitsToUint(entity.meshletCount)) return;
+
+    // We mapped 'isOccluder' into the 'trans' float!
+    bool isOccluder = entity.trans > 0.5;
+
+    // ---> PASS ROUTER <---
+    if (push.passType < 0.5 && !isOccluder) return; // Pass 0 (Walls): Skip the Foxes!
+    if (push.passType > 0.5 && isOccluder) return;  // Pass 1 (Foxes): Skip the Walls!
+
+    uint mID = floatBitsToUint(entity.meshletOffset) + localMeshletID;
+    vec4 bounds = meshletBounds[mID];
+    vec4 worldCenter = entity.modelMatrix * vec4(bounds.xyz, 1.0);
+    float maxScale = max(length(entity.modelMatrix[0].xyz), max(length(entity.modelMatrix[1].xyz), length(entity.modelMatrix[2].xyz)));
+    float worldRadius = bounds.w * maxScale;
+    vec3 actualCameraPos = vec3(push.camX, push.camY, push.camZ);
+
+    if (isFrustumCulled(worldCenter, worldRadius)) return;
+
+    // ---> ONLY THE FOXES DO X-RAY CULLING! <---
+    if (!isOccluder && isOcclusionCulled(worldCenter, worldRadius, actualCameraPos)) return;
+
+    uint snapshotIdx = floatBitsToUint(push.snapshotIndex);
+    uint writeIndex;
+    uint globalWriteLocation;
+
+    if (isOccluder) {
+        writeIndex = atomicAdd(drawCount[snapshotIdx], 1);
+        globalWriteLocation = floatBitsToUint(push.commandOffset) + writeIndex;
+    } else {
+        writeIndex = atomicAdd(drawCount[snapshotIdx + 10], 1);
+        // Offset the Foxes by 500,000 slots so they don't overwrite the walls!
+        globalWriteLocation = floatBitsToUint(push.commandOffset) + 500000 + writeIndex;
+    }
+
+    uvec4 mData = meshletData[mID];
+    drawCommands[globalWriteLocation].indexCount = mData.y;
+    drawCommands[globalWriteLocation].instanceCount = 1;
+    drawCommands[globalWriteLocation].firstIndex = mData.x;
+    drawCommands[globalWriteLocation].vertexOffset = int(mData.z);
+    drawCommands[globalWriteLocation].firstInstance = globalInstanceID;
+}

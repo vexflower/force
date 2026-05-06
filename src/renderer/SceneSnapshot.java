@@ -1,6 +1,5 @@
 package renderer;
 import util.CFloatList;
-import util.CIntList;
 
 public class SceneSnapshot {
     public boolean isOffscreen = false;
@@ -10,23 +9,24 @@ public class SceneSnapshot {
 
     public final CFloatList vpMatrix = new CFloatList(16);
     public final CFloatList entityData = new CFloatList(2_400_000);
-    public final CIntList indirectData = new CIntList(50000);
 
     public int globalEntityOffset = 0;
     public int entityCount = 0;
-    public int commandCount = 0;
+
+    // NEW: Store the physical camera location
+    public float camX, camY, camZ;
+    public float p11; // NEW: The Lens Projection Scaling Factor
 
     public void clear() {
         entityCount = 0;
-        commandCount = 0;
         isOffscreen = false;
         containerId = -1;
         vpMatrix.clear();
         entityData.clear();
-        indirectData.clear();
     }
 
     public void free() {
-        vpMatrix.free(); entityData.free(); indirectData.free();
+        vpMatrix.free();
+        entityData.free();
     }
 }

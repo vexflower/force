@@ -30,5 +30,5 @@ void main() {
     // THE FIX: Use fragShineDamper so the SPIR-V compiler doesn't delete it!
     textureColor.rgb += vec3(fragReflectivity * 0.25) * fragShineDamper;
 
-    outColor = textureColor;
+    outColor = vec4(textureColor.rgb, .6);
 }

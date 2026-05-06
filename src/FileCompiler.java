@@ -24,7 +24,7 @@ public class FileCompiler {
 
                         // 1. Target specifically Java and Shader files
                         boolean isTargetFile = fileName.endsWith(".java") ||
-                                fileName.endsWith(".vert") ||
+                                fileName.endsWith(".vert") || fileName.endsWith(".comp") || fileName.endsWith(".txt") ||
                                 fileName.endsWith(".frag");
 
                         // 2. Explicitly EXCLUDE anything inside a "resources" directory

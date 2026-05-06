@@ -4,13 +4,14 @@ import entity.Entity;
 import entity.Camera;
 import hardware.VulkanContext;
 import hardware.Window;
-import loader.MeshLoader;
+import mesh.MeshLoader;
 import loader.MeshRegistry;
 import loader.TextureLoader;
 import mesh.Mesh;
 import move.Move;
 import move.MoveType;
 import renderer.MasterRenderer;
+import shader.SpirVCompiler;
 import ui.Panel;
 import ui.scene.Scene3D;
 
@@ -21,15 +22,18 @@ public class Main {
         VulkanContext.init();
         MasterRenderer.setRenderer();
 
+        SpirVCompiler.main(null);
+
         // 1. --- LOAD ALL GEOMETRY INTO CPU RAM ---
         Mesh.initPrimitives();
-        MeshLoader.loadObject("obj/fox.obj", true, false);
+        // Load the fox into the staging buffers BEFORE we upload to the GPU!
+        MeshLoader.loadMeshlet("\\meshes\\fox.meshl");
 
         // 2. --- UPLOAD THE MEGA-BUFFERS TO THE GPU ---
         loader.GeomRegistry.uploadToGPU();
 
-        // [NEW] 2.5 --- LINK THE SSBOs TO THE SHADER DESCRIPTOR SET ---
-        shader.VKShader.bindSSBOs(renderer.MasterRenderer.getGlobalEntityBuffer(), loader.GeomRegistry.gpuVertexBuffer);
+        // 2.5 --- LINK THE VAULTS TO THE COMPUTE SHADER ---
+        renderer.MasterRenderer.linkVaults();
 
         // 3. --- LOAD TEXTURES ---
         int foxTex = TextureLoader.loadTexture("images/fox.jpg");
@@ -46,55 +50,74 @@ public class Main {
         Entity floor = new Entity(MeshRegistry.get("floor"), bratTex); // Reusing fox tex for now
         floor.setPosition(0, 0, 0); // Put it slightly below the camera
         floor.setRotation(0, 0, 0); // Lay it flat on the ground
-        floor.scale = 2000f;
+        floor.setScale(2000f);
         scene.addEntity(floor);
 
         Scene3D scene2 = new Scene3D(400, 400);
         scene2.setBackgroundColor(.2f, .2f, .9f, .4f);
         scene2.setPosition(100, 100);
 
-        // Access meshes intuitively by String!
-        Entity brat = new Entity(MeshRegistry.get("cube"), bratTex);
-        brat.setPosition(0, 0, 150);
-        brat.setRotation(0, 200f, 0);
-        brat.scale = 50f;
-        scene2.addEntity(brat);
-        scene2.addEntity(floor);
-        scene.add(scene2);
+        // ==========================================
+        // --- THE WALLS (The Occluders) ---
+        // ==========================================
+        Mesh cubeMesh = MeshRegistry.get("cube");
 
-        Camera cam = new Camera();
-        cam.setPosition(0f, 20f, 0);
-        scene.setCamera(cam);
-        scene2.setCamera(cam);
-        scene2.updatesCamera = false;
+        Entity northWall = new Entity(cubeMesh, bratTex);
+        northWall.setPosition(0, 50f, 400f);
+        northWall.setScale(800f, 100f, 20f); // 800 wide, 100 tall, 20 thick
+        scene.addEntity(northWall);
 
-        // Inside Main.java
-        // Replace the old ent setup with this:
-        Entity ent = new Entity(MeshRegistry.get("fox"), foxTex);
-        ent.setPosition(0, 200f, 200f); // Start way up in the air
-        ent.scale = 50f;
-        scene.addEntity(ent);
+        Entity southWall = new Entity(cubeMesh, bratTex);
+        southWall.setPosition(0, 50f, -400f);
+        southWall.setScale(800f, 100f, 20f);
+        scene.addEntity(southWall);
 
-        // Tell the engine to drop it to Y=20 over 2 seconds using a bouncy curve
-        ent.move(Move.BOUNCE_OUT, MoveType.POINT, 0f, 0f, 200f, 3f);
+        Entity eastWall = new Entity(cubeMesh, bratTex);
+        eastWall.setPosition(400f, 50f, 0);
+        eastWall.setScale(20f, 100f, 800f);
+        scene.addEntity(eastWall);
 
-        scene.addEntity(ent);
+        Entity westWall = new Entity(cubeMesh, bratTex);
+        westWall.setPosition(-400f, 50f, 0);
+        westWall.setScale(20f, 100f, 800f);
+        scene.addEntity(westWall);
 
+        // ==========================================
+        // --- THE STRESS TEST (The Foxes) ---
+        // ==========================================
         java.util.Random random = new java.util.Random();
-//        for(int i = 0; i < 1000; i++) {
-//            Entity foxIter = new Entity(MeshRegistry.get("fox"), foxTex);
-//            foxIter.scale = 30f;
-//            foxIter.setPosition(random.nextFloat(500) - 250, random.nextFloat(500) - 250, random.nextFloat(500) - 250);
-//            //oxIter.moveRotate(random.nextFloat(10), random.nextFloat(300), random.nextFloat(20), -1f);
-//            scene.addEntity(foxIter);
-//        }
+        for(int i = 0; i < 1500; i++) {
+            Entity foxIter = new Entity(MeshRegistry.get("fox"), foxTex);
+            foxIter.setScale(20f);
 
-        brat.moveRotate(0f, -90f, 0, -1);
+            // Scatter them wildly between -1000 and +1000
+            // This guarantees hundreds of them are completely hidden behind the walls!
+            float rx = random.nextFloat(2000) - 1000;
+            float rz = random.nextFloat(2000) - 1000;
+            foxIter.setPosition(rx, 20f, rz);
+
+            // Give them random rotations
+            //foxIter.setRotation(0, random.nextFloat(360), 0);
+            scene.addEntity(foxIter);
+        }
+
+        // ==========================================
+        // --- SCENE SETUP & CAMERA ---
+        // ==========================================
+        Camera cam = new Camera();
+        cam.setPosition(0f, 20f, 0); // Spawn exactly in the middle of the arena
+        scene.setCamera(cam);
 
         Panel myPanel = new Panel(300, 300);
         myPanel.setBackgroundColor(0.8f, 0.1f, 0.1f, 0.7f);
         myPanel.setPosition(50, 50);
         scene.add(myPanel);
+
+        floor.isOccluder = 1.0f;
+        northWall.isOccluder = 1.0f;
+        southWall.isOccluder = 1.0f;
+        eastWall.isOccluder = 1.0f;
+        westWall.isOccluder = 1.0f;
 
         // 5. --- START THE ENGINE ---
         GameEngine.start();
